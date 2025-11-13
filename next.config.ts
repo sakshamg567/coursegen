@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    serverComponentsExternalPackages: ["esbuild", "vm2"],
+  },
+  serverExternalPackages: ["esbuild", "vm2"],
 };
 
 export default nextConfig;

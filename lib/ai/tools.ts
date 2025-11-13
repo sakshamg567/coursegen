@@ -3,22 +3,9 @@ import { tool } from "ai";
 import * as ai from "ai";
 import { google } from "@ai-sdk/google";
 import { wrapAISDK } from "langsmith/experimental/vercel";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-
-// Use service role for server-side operations
-// If you don't have service role, you can use the regular server client
-// but make sure you have proper RLS policies
-const supabase = createSupabaseClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  },
-);
+import { createClient } from "@/lib/supabase/server";
+import { inngest } from "@/inngest/client";
+import { Database } from "@/lib/types";
 
 const { generateObject } = wrapAISDK(ai);
 
@@ -31,6 +18,7 @@ export const generateCoursePlan = tool({
     lesson_count: z.number().describe("Number of lessons to generate"),
   }),
   execute: async function ({ outline, lesson_count }) {
+    const supabase = await createClient();
     console.log("Generating course plan for:", {
       outline,
       lesson_count,
@@ -68,7 +56,7 @@ Generate the course structure now.`,
 
     // Insert into Supabase
     const userId = "1234";
-    const { data, error } = await supabase
+    const { data: data, error: error } = await supabase
       .from("courses")
       .insert({
         topic: object.topic,
@@ -83,12 +71,47 @@ Generate the course structure now.`,
       throw new Error(`Failed to store course: ${error.message}`);
     }
 
-    console.log("Course stored in Supabase:", data);
+    const lessonInserts: Database["public"]["Tables"]["lessons"]["Insert"] =
+      object.lessons.map((lesson, index) => ({
+        course_id: data.id,
+        title: lesson.title,
+        objective: lesson.objective,
+        order: index + 1,
+        status: "pending",
+      }));
+
+    const { data: lessons, error: lessonsError } = await supabase
+      .from("lessons")
+      .insert(lessonInserts)
+      .select();
+
+    if (lessonsError) {
+      throw new Error(`Failed to store lessons : ${lessonsError.message}`);
+    }
+
+    console.log(`Created ${lessons.length} lesson entries`);
+
+    const eventPromises = lessons.map((lesson) =>
+      inngest.send({
+        name: "lesson.generate",
+        data: {
+          lesson_id: lesson.id,
+          title: lesson.title,
+          objective: lesson.objective,
+          course_id: data.id,
+        },
+      }),
+    );
+
+    await Promise.all(eventPromises);
+    console.log(`Triggered ${eventPromises.length} Inngest events`);
 
     return {
       course_plan: object,
       course_id: data?.id,
+      lesson_count: lessons.length,
       success: true,
+      message: `Created Course ${object.topic} with ${lessons.length} lessons`,
     };
   },
 });

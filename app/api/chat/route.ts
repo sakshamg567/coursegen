@@ -1,4 +1,4 @@
-import { generateCoursePlan } from "@/app/ai/tools";
+import { generateCoursePlan } from "@/lib/ai/tools";
 import { google } from "@ai-sdk/google";
 import * as ai from "ai";
 import { stepCountIs } from "ai";
@@ -25,7 +25,11 @@ When a user asks to create a course or lessons, you MUST:
 Always acknowledge the course creation and provide details about the generated lessons.`,
     messages: ai.convertToModelMessages(messages),
     tools: {
-      generateCoursePlan,
+      generateCoursePlan: {
+        ...generateCoursePlan,
+        execute: async (params) =>
+          generateCoursePlan.execute({ ...params, userId }),
+      },
     },
     stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
   });

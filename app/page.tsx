@@ -2,7 +2,6 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useState } from "react";
-import { Weather } from "@/components/weather";
 import { DefaultChatTransport } from "ai";
 
 export default function Page() {
