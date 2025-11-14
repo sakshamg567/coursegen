@@ -1,12 +1,25 @@
-import { NodeVM } from "vm2";
 import { inngest } from "./client";
 import { vercel } from "@ai-sdk/vercel";
 import { generateText } from "@/lib/ai";
 import { transformSync } from "esbuild";
-import React from "react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
+import { Database } from "@/lib/types";
 
 const MAX_RETRIES = 1;
+
+// Create a Supabase client with service role for server-side operations
+function createServiceClient() {
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+}
 
 export const generateLesson = inngest.createFunction(
   { id: "generate_lesson" },
@@ -15,17 +28,21 @@ export const generateLesson = inngest.createFunction(
   async ({ event, step }) => {
     const { lesson_id, title, objective, course_id } = event.data;
     console.log(`[Inngest] Starting lesson generation for lesson ${lesson_id}`);
-    const supabase = await createClient();
+    const supabase = createServiceClient();
 
     let attempt = 0;
     let lastErr = "";
     let generated_code = "";
     let html = "";
 
-    await supabase
+    const { error: statusError } = await supabase
       .from("lessons")
       .update({ status: "processing" })
       .eq("id", lesson_id);
+
+    if (statusError) {
+      console.error("Failed to update status to processing:", statusError);
+    }
 
     while (attempt < MAX_RETRIES) {
       attempt++;
@@ -149,23 +166,30 @@ export const generateLesson = inngest.createFunction(
           throw new Error(`Upload error : ${uploadError.message}`);
         }
 
+        // Fix: Get public URL from the same path where file was uploaded
         const { data: urlData } = supabase.storage
           .from("lessons")
-          .getPublicUrl(`compiled/${fileName}`);
+          .getPublicUrl(fileName);
 
-        console.log("data", urlData);
+        console.log("Public URL data:", urlData);
 
-        await supabase
-          .from("lessons")
-          .update({ compiled_js_url: urlData.publicUrl })
-          .eq("id", lesson_id);
-
-        await supabase
+        const { error: updateError } = await supabase
           .from("lessons")
           .update({
+            compiled_js_url: urlData.publicUrl,
             status: "completed",
           })
           .eq("id", lesson_id);
+
+        if (updateError) {
+          console.error(
+            "Failed to update lesson with URL and status:",
+            updateError,
+          );
+          throw new Error(`Database update error: ${updateError.message}`);
+        }
+
+        console.log(`[Inngest] Successfully completed lesson ${lesson_id}`);
         return { success: true, lesson_id };
       } catch (err: any) {
         lastErr = `Compile error: ${err.message}`;
@@ -208,10 +232,15 @@ export const generateLesson = inngest.createFunction(
       // }
       //
     }
-    await supabase
+
+    const { error: failError } = await supabase
       .from("lessons")
       .update({ status: "failed", error: lastErr })
       .eq("id", lesson_id);
+
+    if (failError) {
+      console.error("Failed to update lesson status to failed:", failError);
+    }
 
     console.error(
       `[Inngest] Lesson ${lesson_id} generation failed after all retries:`,

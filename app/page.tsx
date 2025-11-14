@@ -1,12 +1,16 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DefaultChatTransport } from "ai";
+import { useUser } from "./hooks/useUser";
+import { createClient } from "@/lib/supabase/client";
+import { Database } from "@/lib/types";
+import Link from "next/link";
 
 export default function Page() {
   const [input, setInput] = useState("");
-  const userId = "1234";
+  const userId = useUser();
   const { messages, sendMessage } = useChat({
     transport: new DefaultChatTransport({
       body: { userId },
@@ -45,24 +49,6 @@ export default function Page() {
                   // Text content
                   if (part.type === "text") {
                     return <div key={index}>{part.text}</div>;
-                  }
-
-                  // Weather tool (keep your existing one)
-                  if (part.type === "tool-displayWeather") {
-                    switch (part.state) {
-                      case "input-available":
-                        return <div key={index}>Loading weather...</div>;
-                      case "output-available":
-                        return (
-                          <div key={index}>
-                            <Weather {...part.output} />
-                          </div>
-                        );
-                      case "output-error":
-                        return <div key={index}>Error: {part.errorText}</div>;
-                      default:
-                        return null;
-                    }
                   }
 
                   // Course generation tool
@@ -125,7 +111,7 @@ export default function Page() {
 
 // Component to display course plan
 function CoursePlanDisplay({ output }: { output: any }) {
-  const { course_plan, course_id, success } = output;
+  const { course_plan, course_id, success, lesson_ids } = output;
 
   if (!success || !course_plan) {
     return (
@@ -162,19 +148,158 @@ function CoursePlanDisplay({ output }: { output: any }) {
 
       <div className="space-y-3">
         {course_plan.lessons.map((lesson: any, idx: number) => (
-          <div
+          <LessonCard
             key={idx}
-            className="p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
-          >
-            <div className="font-medium text-gray-900 dark:text-white">
-              Lesson {idx + 1}: {lesson.title}
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              {lesson.objective}
-            </div>
-          </div>
+            lesson={lesson}
+            lessonId={lesson_ids?.[idx]}
+            lessonNumber={idx + 1}
+          />
         ))}
       </div>
+    </div>
+  );
+}
+
+function LessonCard({
+  lesson,
+  lessonId,
+  lessonNumber,
+}: {
+  lesson: any;
+  lessonId?: number;
+  lessonNumber: number;
+}) {
+  const [lessonStatus, setLessonStatus] = useState<string | null>(
+    lesson.status || "pending",
+  );
+  const [isReady, setIsReady] = useState(false);
+  const supabase = createClient();
+
+  useEffect(() => {
+    if (!lessonId) return;
+
+    const fetchLesson = async () => {
+      const { data, error } = await supabase
+        .from("lessons")
+        .select("status, compiled_js_url")
+        .eq("id", lessonId)
+        .single();
+      if (data) {
+        setLessonStatus(data.status);
+        setIsReady(data.status === "completed" && !!data.compiled_js_url);
+      }
+    };
+    fetchLesson();
+
+    const channel = supabase
+      .channel(`lesson-${lessonId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "lessons",
+          filter: `id=eq.${lessonId}`,
+        },
+        (payload) => {
+          const newLesson =
+            payload.new as Database["public"]["Tables"]["lessons"]["Update"];
+          setLessonStatus(newLesson.status!);
+          setIsReady(
+            newLesson.status === "completed" && !!newLesson.compiled_js_url,
+          );
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [lessonId, supabase]);
+
+  return (
+    <div className="p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-gray-900 dark:text-white">
+            Lesson {lessonNumber}: {lesson.title}
+          </div>
+          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            {lesson.objective}
+          </div>
+
+          {/* Status indicator */}
+          <div className="mt-2 flex items-center gap-2">
+            <LessonStatusBadge status={lessonStatus} />
+          </div>
+        </div>
+
+        {/* Link to lesson when ready */}
+        {isReady && lessonId && (
+          <Link
+            href={`/lesson/${lessonId}`}
+            className="flex-shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors"
+          >
+            View Lesson →
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Status badge component
+function LessonStatusBadge({ status }: { status: string | null }) {
+  if (!status || status === "pending") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-full">
+        <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+        <span>Pending</span>
+      </div>
+    );
+  }
+
+  if (status === "generating" || status === "processing") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full">
+        <div className="animate-spin rounded-full h-2 w-2 border border-blue-600 border-t-transparent"></div>
+        <span>Generating...</span>
+      </div>
+    );
+  }
+
+  if (status === "completed") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded-full">
+        <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 20 20">
+          <path
+            fillRule="evenodd"
+            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span>Ready</span>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs rounded-full">
+        <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 20 20">
+          <path
+            fillRule="evenodd"
+            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span>Failed</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-full">
+      <span>{status}</span>
     </div>
   );
 }

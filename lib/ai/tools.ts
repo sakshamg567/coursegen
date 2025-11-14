@@ -71,12 +71,11 @@ Generate the course structure now.`,
       throw new Error(`Failed to store course: ${error.message}`);
     }
 
-    const lessonInserts: Database["public"]["Tables"]["lessons"]["Insert"] =
+    const lessonInserts: Database["public"]["Tables"]["lessons"]["Insert"][] =
       object.lessons.map((lesson, index) => ({
         course_id: data.id,
         title: lesson.title,
         objective: lesson.objective,
-        order: index + 1,
         status: "pending",
       }));
 
@@ -109,6 +108,7 @@ Generate the course structure now.`,
     return {
       course_plan: object,
       course_id: data?.id,
+      lesson_ids: lessons.map((l) => l.id),
       lesson_count: lessons.length,
       success: true,
       message: `Created Course ${object.topic} with ${lessons.length} lessons`,

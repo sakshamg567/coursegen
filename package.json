@@ -20,6 +20,7 @@
     "ai": "^5.0.92",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "desmos-react": "^1.2.0",
     "dotenv": "^17.2.3",
     "esbuild": "^0.27.0",
     "inngest": "^3.45.1",
@@ -30,6 +31,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.3.0",
+    "uuid": "^13.0.0",
     "vm2": "^3.10.0",
     "zod": "^4.1.12"
   },
