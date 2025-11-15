@@ -31,7 +31,7 @@ export default function Page() {
     transport: new DefaultChatTransport({
       body: { userId },
     }),
-    initialMessages: getInitialMessages(),
+    messages: getInitialMessages(),
   });
 
   // Mark as mounted and restore messages
@@ -147,10 +147,11 @@ export default function Page() {
                       if (part.type === "text") {
                         return (
                           <ReactMarkdown
-                            children={part.text}
                             key={index}
                             remarkPlugins={[remarkGfm]}
-                          />
+                          >
+                            {part.text}
+                          </ReactMarkdown>
                         );
                       }
 

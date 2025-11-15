@@ -1,3 +1,6 @@
+import { ReactNode } from "react";
+import { motion } from "framer-motion";
+import katex from "katex";
 import {
   ResponsiveContainer,
   LineChart,
@@ -6,30 +9,49 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { motion } from "framer-motion";
 import { QuizComponent } from "./ui/QuizComponent";
 import { CalculatorUI } from "./ui/CalculatorUI";
-import katex from "katex";
-// Box: simple container
-export const Box = ({ children, className = "" }) => (
-  <div className={`p-4 rounded-lg ${className}`}>{children}</div>
-);
+
+// Box
+export const Box = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => <div className={`p-4 rounded-lg ${className}`}>{children}</div>;
 
 // Text
-export const Text = ({ children, className = "" }) => (
-  <p className={`${className}`}>{children}</p>
-);
+export const Text = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => <p className={className}>{children}</p>;
 
-// Callout (accent)
-export const Callout = ({ title, children }) => (
+// Callout
+export const Callout = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) => (
   <div className="p-4 rounded-md bg-indigo-50 border-l-4 border-indigo-500">
     <strong className="block mb-1">{title}</strong>
     <div>{children}</div>
   </div>
 );
 
-// AnimatedCard (framer-motion)
-export const AnimatedCard = ({ children, className = "" }) => (
+// AnimatedCard
+export const AnimatedCard = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => (
   <motion.div
     initial={{ y: 8, opacity: 0 }}
     animate={{ y: 0, opacity: 1 }}
@@ -39,8 +61,18 @@ export const AnimatedCard = ({ children, className = "" }) => (
   </motion.div>
 );
 
-// Graph: small wrapper for recharts
-export const Graph = ({ data, xKey = "x", yKey = "y", height = 220 }) => (
+// Graph
+export const Graph = ({
+  data,
+  xKey = "x",
+  yKey = "y",
+  height = 220,
+}: {
+  data: any[];
+  xKey?: string;
+  yKey?: string;
+  height?: number;
+}) => (
   <ResponsiveContainer width="100%" height={height}>
     <LineChart data={data}>
       <Line dataKey={yKey} />
@@ -51,8 +83,19 @@ export const Graph = ({ data, xKey = "x", yKey = "y", height = 220 }) => (
   </ResponsiveContainer>
 );
 
-// SVGCanvas: draw arbitrary svg shapes from JSON
-export const SVGCanvas = ({ width = 600, height = 300, shapes = [] }) => (
+// SVGCanvas
+export const SVGCanvas = ({
+  width = 600,
+  height = 300,
+  shapes = [],
+}: {
+  width?: number;
+  height?: number;
+  shapes: {
+    type: "circle" | "line" | "path";
+    [key: string]: any;
+  }[];
+}) => (
   <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
     {shapes.map((s, i) => {
       if (s.type === "circle")
@@ -77,19 +120,39 @@ export const SVGCanvas = ({ width = 600, height = 300, shapes = [] }) => (
   </svg>
 );
 
-// Calculator: small physics calculator the LLM can call interactively
-export const Calculator = ({ formula, inputs, onResult }) => {
-  // formula: "v = u + at" (string) - we provide UI for input names
-  return <CalculatorUI formula={formula} inputs={inputs} onResult={onResult} />;
+// Calculator
+export const Calculator = ({
+  formula,
+  inputs,
+  onResult,
+}: {
+  formula: string;
+  inputs: { name: string; label: string; type?: string }[];
+  onResult: (result: number) => void;
+}) => <CalculatorUI formula={formula} inputs={inputs} onResult={onResult} />;
+
+// Quiz
+type QuizQuestion = {
+  id: number;
+  question: string;
+  options: string[];
+  correct: string;
 };
 
-// Quiz: interactive multiple choice quizzes
-export const Quiz = ({ questions, onComplete }) => (
-  <QuizComponent questions={questions} onComplete={onComplete} />
-);
+export const Quiz = ({
+  questions,
+  onComplete,
+}: {
+  questions: QuizQuestion[];
+  onComplete: (score: number) => void;
+}) => <QuizComponent questions={questions} onComplete={onComplete} />;
 
-// Timeline / Steps
-export const Timeline = ({ steps }) => (
+// Timeline
+export const Timeline = ({
+  steps,
+}: {
+  steps: { title: string; desc: string }[];
+}) => (
   <ol>
     {steps.map((s, i) => (
       <li key={i}>
@@ -100,13 +163,20 @@ export const Timeline = ({ steps }) => (
   </ol>
 );
 
-export const CodeBlock = ({ code, language = "tsx" }) => (
+// CodeBlock
+export const CodeBlock = ({
+  code,
+  language = "tsx",
+}: {
+  code: string;
+  language?: string;
+}) => (
   <pre className="rounded bg-slate-900 text-white p-3">
     <code>{code}</code>
   </pre>
 );
 
-// Math (KaTeX)
-export const Math = ({ tex }) => (
+// Math
+export const Math = ({ tex }: { tex: string }) => (
   <div dangerouslySetInnerHTML={{ __html: katex.renderToString(tex) }} />
 );

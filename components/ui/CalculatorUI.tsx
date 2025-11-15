@@ -1,15 +1,27 @@
-// components/blocks/CalculatorUI.tsx
 import { useState } from "react";
 
-export const CalculatorUI = ({ formula, inputs, onResult }) => {
-  // inputs = [{ name:"u", label:"Initial velocity", type:"number" }, ...]
-  const [values, setValues] = useState({});
+type CalcInput = {
+  name: string;
+  label: string;
+  type?: string; // "number" etc
+};
+
+export const CalculatorUI = ({
+  formula,
+  inputs,
+  onResult,
+}: {
+  formula: string;
+  inputs: CalcInput[];
+  onResult?: (result: number) => void;
+}) => {
+  const [values, setValues] = useState<Record<string, string>>({});
 
   const compute = () => {
-    // extremely sandboxed, no eval
-    // you can replace with safer math later
+    // still using Function() — your call, but typing is fine
     const fn = new Function(...inputs.map((i) => i.name), `return ${formula};`);
-    const args = inputs.map((i) => parseFloat(values[i.name] || 0));
+
+    const args = inputs.map((i) => parseFloat(values[i.name] || "0"));
     const result = fn(...args);
     onResult?.(result);
   };
@@ -25,7 +37,10 @@ export const CalculatorUI = ({ formula, inputs, onResult }) => {
             type="number"
             className="border p-2 rounded w-full"
             onChange={(e) =>
-              setValues((prev) => ({ ...prev, [input.name]: e.target.value }))
+              setValues((prev) => ({
+                ...prev,
+                [input.name]: e.target.value,
+              }))
             }
           />
         </div>

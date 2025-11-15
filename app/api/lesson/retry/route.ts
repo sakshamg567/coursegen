@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { Database } from "@/lib/types";
+import { type Database } from "@/lib/types";
 import { inngest } from "@/inngest/client";
 
 // Create a Supabase client with service role for server-side operations

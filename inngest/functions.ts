@@ -5,6 +5,7 @@ import { transformSync } from "esbuild";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "@/lib/types";
 import { generate_svg_tool } from "@/lib/ai/tools";
+import { stepCountIs } from "ai";
 
 const MAX_RETRIES = 3;
 
@@ -299,7 +300,7 @@ Rules:
         prompt: prompt,
         temperature: 0.6,
         maxOutputTokens: 10000,
-        maxSteps: 5, // Allow up to 5 steps for tool calls and continuation
+        stopWhen: stepCountIs(5), // Allow up to 5 steps for tool calls and continuation
         tools: { generate_svg: generate_svg_tool },
       });
 

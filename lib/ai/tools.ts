@@ -17,12 +17,14 @@ export const generateCoursePlan = tool({
       .string()
       .describe("The outline of the course provided by the user"),
     lesson_count: z.number().describe("Number of lessons to generate"),
+    userId: z.string().describe("The ID of the user creating the course"),
   }),
-  execute: async function ({ outline, lesson_count }) {
+  execute: async function ({ outline, lesson_count, userId }) {
     const supabase = await createClient();
     console.log("Generating course plan for:", {
       outline,
       lesson_count,
+      userId,
     });
 
     const { object } = await generateObject({
@@ -56,7 +58,6 @@ Generate the course structure now.`,
     console.log("Generated course plan:", JSON.stringify(object, null, 2));
 
     // Insert into Supabase
-    const userId = "1234";
     const { data: data, error: error } = await supabase
       .from("courses")
       .insert({

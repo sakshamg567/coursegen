@@ -1,8 +1,23 @@
 // components/blocks/QuizComponent.tsx
 import { useState } from "react";
 
-export const QuizComponent = ({ questions, onComplete }) => {
-  const [answers, setAnswers] = useState({});
+type QuizQuestion = {
+  id: number;
+  question: string;
+  options: string[];
+  correct: string;
+};
+
+type QuizComponentProps = {
+  questions: QuizQuestion[];
+  onComplete?: (score: number) => void;
+};
+
+export const QuizComponent = ({
+  questions,
+  onComplete,
+}: QuizComponentProps) => {
+  const [answers, setAnswers] = useState<Record<number, string>>({});
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = () => {

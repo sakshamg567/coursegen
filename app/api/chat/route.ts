@@ -25,11 +25,7 @@ When a user asks to create a course or lessons, you MUST:
 Always acknowledge the course creation and provide details about the generated lessons.`,
     messages: ai.convertToModelMessages(messages),
     tools: {
-      generateCoursePlan: {
-        ...generateCoursePlan,
-        execute: async (params) =>
-          generateCoursePlan.execute({ ...params, userId }),
-      },
+      generateCoursePlan,
     },
     stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
     experimental_transform: ai.smoothStream(),
