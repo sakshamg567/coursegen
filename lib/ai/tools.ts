@@ -3,11 +3,24 @@ import { tool } from "ai";
 import * as ai from "ai";
 import { google } from "@ai-sdk/google";
 import { wrapAISDK } from "langsmith/experimental/vercel";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import { inngest } from "@/inngest/client";
 import { Database } from "@/lib/types";
 
 const { generateObject } = wrapAISDK(ai);
+
+function createServiceClient() {
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+}
 
 export const generateCoursePlan = tool({
   name: "generate_course_plan",
@@ -20,7 +33,7 @@ export const generateCoursePlan = tool({
     userId: z.string().describe("The ID of the user creating the course"),
   }),
   execute: async function ({ outline, lesson_count, userId }) {
-    const supabase = await createClient();
+    const supabase = createServiceClient();
     console.log("Generating course plan for:", {
       outline,
       lesson_count,
