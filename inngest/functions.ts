@@ -4,8 +4,9 @@ import { generateText } from "@/lib/ai";
 import { transformSync } from "esbuild";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "@/lib/types";
+import { generate_svg_tool } from "@/lib/ai/tools";
 
-const MAX_RETRIES = 1;
+const MAX_RETRIES = 3;
 
 // Create a Supabase client with service role for server-side operations
 function createServiceClient() {
@@ -26,7 +27,8 @@ export const generateLesson = inngest.createFunction(
   { event: "lesson.generate" },
 
   async ({ event, step }) => {
-    const { lesson_id, title, objective, course_id } = event.data;
+    const { lesson_id, title, objective, course_id, previous_error, is_retry } =
+      event.data;
     console.log(`[Inngest] Starting lesson generation for lesson ${lesson_id}`);
     const supabase = createServiceClient();
 
@@ -49,96 +51,285 @@ export const generateLesson = inngest.createFunction(
       console.log(
         `[Inngest] Attempt ${attempt}/${MAX_RETRIES} for lesson ${lesson_id}`,
       );
-      const prompt =
-        attempt === 1
-          ? `You are an expert React/TypeScript developer and educational content creator.
 
-       Generate a complete, self-contained React component for the following lesson:
-      Title: ${title}
-       objective: ${objective}
+      // Build the prompt based on whether this is a retry or first attempt
+      let prompt = "";
 
-       CRITICAL REQUIREMENTS:
-       1. Generate ONLY the component code, no imports, no exports, no markdown
-       2. The component must be named "LessonComponent"
-       3. Use Tailwind CSS for styling (it's already available)
-       4. Make it interactive and engaging where appropriate
-       5. Include proper TypeScript types
-       6. The code must be production-ready and error-free
-       7. For quizzes: include state management, answer checking, and score tracking
-       8. For explanations: use clear sections, examples, and visual hierarchy
-       9. For interactive content: add buttons, inputs, and dynamic behavior
-       10. Use modern React patterns (hooks, functional components)
-       11. MUST have ALL closing tags - validate JSX is complete
+      if (attempt === 1 && is_retry && previous_error) {
+        // This is a manual retry with a previous error
+        prompt = `You are an expert React/TypeScript developer and educational content creator.
 
+This is a RETRY attempt. The previous generation failed with the following error:
+${previous_error}
 
-       SIMPLE TEMPLATE TO FOLLOW:
+Please generate a corrected version that addresses this error.
 
-       function LessonComponent() {
-         const [activeSection, setActiveSection] = React.useState(0);
+Generate a complete, self-contained React component for the following lesson:
+Title: ${title}
+Objective: ${objective}
 
-         return (
-           <div className="max-w-4xl mx-auto p-6">
-             <h1 className="text-3xl font-bold mb-6">${title}</h1>
+CRITICAL REQUIREMENTS:
+1. Generate ONLY the component code, no imports, no exports, no markdown
+2. The component must be named "LessonComponent"
+3. Use Tailwind CSS for styling (it's already available)
+4. Make it interactive and engaging where appropriate
+5. Include proper TypeScript types
+6. The code must be production-ready and error-free
+7. For quizzes: include state management, answer checking, and score tracking
+8. For explanations: use clear sections, examples, and visual hierarchy
+9. For interactive content: add buttons, inputs, and dynamic behavior
+10. Use modern React patterns (hooks, functional components)
+11. MUST have ALL closing tags - validate JSX is complete
 
-             <div className="bg-blue-50 p-6 rounded-lg mb-6">
-               <h2 className="text-xl font-semibold mb-3">Introduction</h2>
-               <p className="text-gray-700">
-                 [Brief introduction about the topic]
-               </p>
-             </div>
+SIMPLE TEMPLATE TO FOLLOW:
 
-             <div className="space-y-4 mb-6">
-               <h2 className="text-xl font-semibold">Key Concepts</h2>
-               <div className="grid md:grid-cols-2 gap-4">
-                 <div className="bg-white p-4 rounded-lg border">
-                   <h3 className="font-semibold mb-2">Concept 1</h3>
-                   <p className="text-sm text-gray-600">[Explanation]</p>
-                 </div>
-                 <div className="bg-white p-4 rounded-lg border">
-                   <h3 className="font-semibold mb-2">Concept 2</h3>
-                   <p className="text-sm text-gray-600">[Explanation]</p>
-                 </div>
-               </div>
-             </div>
+function LessonComponent() {
+  const [activeSection, setActiveSection] = React.useState(0);
 
-             <div className="bg-green-50 p-6 rounded-lg">
-               <h2 className="text-xl font-semibold mb-3">Summary</h2>
-               <p className="text-gray-700">[Brief summary]</p>
-             </div>
-           </div>
-         );
-       }
+  return (
+    <div className="max-w-4xl mx-auto p-6">
+      <h1 className="text-3xl font-bold mb-6">${title}</h1>
 
-       Now generate the component for: ${objective}
+      <div className="bg-blue-50 p-6 rounded-lg mb-6">
+        <h2 className="text-xl font-semibold mb-3">Introduction</h2>
+        <p className="text-gray-700">
+          [Brief introduction about the topic]
+        </p>
+      </div>
 
-       Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`
-          : `The following React TSX component failed to compile or render:
+      <div className="space-y-4 mb-6">
+        <h2 className="text-xl font-semibold">Key Concepts</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-white p-4 rounded-lg border">
+            <h3 className="font-semibold mb-2">Concept 1</h3>
+            <p className="text-sm text-gray-600">[Explanation]</p>
+          </div>
+          <div className="bg-white p-4 rounded-lg border">
+            <h3 className="font-semibold mb-2">Concept 2</h3>
+            <p className="text-sm text-gray-600">[Explanation]</p>
+          </div>
+        </div>
+      </div>
 
-       Error: ${lastErr}
+      <div className="bg-green-50 p-6 rounded-lg">
+        <h2 className="text-xl font-semibold mb-3">Summary</h2>
+        <p className="text-gray-700">[Brief summary]</p>
+      </div>
+    </div>
+  );
+}
 
-       Broken Code:
-       ${generated_code}
+You can use UI components from "shadcn".
+Available components:
+- Box({children, className})
+- Text({children, className})
+- Callout({title, children})
+- AnimatedCard({children, className})
+- Graph({data, xKey, yKey, height})
+- SVGCanvas({width, height, shapes})
+- Calculator({formula, inputs})
+- Quiz({questions})
+- Timeline({steps})
+- CodeBlock({code, language})
+- Math({tex})
 
-       Fix it and output a **working corrected version** of the same component.
-       Rules:
-       - Keep the same function name (LessonComponent)
-       - Return only the function code
-       - It must compile and render without error.`;
+DO NOT WRITE ANY IMPORT STATEMENTS, ASSUME THE COMPONENTS TO BE IMPORTED GLOBALLY, JUST USE THEM NORMALLY
 
-      const { text } = await generateText({
+## SVG GENERATION RULES
+
+You have access to a tool:
+
+    generate_svg({ prompt })
+
+Use this tool to generate **educational SVG diagrams** whenever a diagram would help understanding.
+
+Examples of when to call 'generate_svg':
+- force arrows, vectors, motion diagrams
+- geometry shapes
+- number lines
+- coordinate grid visualizations
+- free body diagrams
+- projectile motion arcs
+- physics conceptual explanations
+- math relationships or annotated shapes
+- algorithm diagrams or flowcharts
+
+Do NOT call generate_svg unless the diagram is directly useful.
+
+### After the tool returns the SVG:
+
+You MUST continue generating and embed the returned SVG in your component like this:
+
+    <div dangerouslySetInnerHTML={{ __html: \`\${svg_from_tool}\` }} />
+
+or wrap it in a component if needed.
+
+IMPORTANT: After calling any tools, you MUST output the complete LessonComponent function with the tool results incorporated.
+
+Now generate the component for: ${objective}
+
+Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`;
+      } else if (attempt === 1) {
+        // First attempt (not a retry)
+        prompt = `You are an expert React/TypeScript developer and educational content creator.
+
+Generate a complete, self-contained React component for the following lesson:
+Title: ${title}
+Objective: ${objective}
+
+CRITICAL REQUIREMENTS:
+1. Generate ONLY the component code, no imports, no exports, no markdown
+2. The component must be named "LessonComponent"
+3. Use Tailwind CSS for styling (it's already available)
+4. Make it interactive and engaging where appropriate
+5. Include proper TypeScript types
+6. The code must be production-ready and error-free
+7. For quizzes: include state management, answer checking, and score tracking
+8. For explanations: use clear sections, examples, and visual hierarchy
+9. For interactive content: add buttons, inputs, and dynamic behavior
+10. Use modern React patterns (hooks, functional components)
+11. MUST have ALL closing tags - validate JSX is complete
+
+SIMPLE TEMPLATE TO FOLLOW:
+
+function LessonComponent() {
+  const [activeSection, setActiveSection] = React.useState(0);
+
+  return (
+    <div className="max-w-4xl mx-auto p-6">
+      <h1 className="text-3xl font-bold mb-6">${title}</h1>
+
+      <div className="bg-blue-50 p-6 rounded-lg mb-6">
+        <h2 className="text-xl font-semibold mb-3">Introduction</h2>
+        <p className="text-gray-700">
+          [Brief introduction about the topic]
+        </p>
+      </div>
+
+      <div className="space-y-4 mb-6">
+        <h2 className="text-xl font-semibold">Key Concepts</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-white p-4 rounded-lg border">
+            <h3 className="font-semibold mb-2">Concept 1</h3>
+            <p className="text-sm text-gray-600">[Explanation]</p>
+          </div>
+          <div className="bg-white p-4 rounded-lg border">
+            <h3 className="font-semibold mb-2">Concept 2</h3>
+            <p className="text-sm text-gray-600">[Explanation]</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-green-50 p-6 rounded-lg">
+        <h2 className="text-xl font-semibold mb-3">Summary</h2>
+        <p className="text-gray-700">[Brief summary]</p>
+      </div>
+    </div>
+  );
+}
+
+You can use UI components from "shadcn".
+Available components:
+- Box({children, className})
+- Text({children, className})
+- Callout({title, children})
+- AnimatedCard({children, className})
+- Graph({data, xKey, yKey, height})
+- SVGCanvas({width, height, shapes})
+- Calculator({formula, inputs})
+- Quiz({questions})
+- Timeline({steps})
+- CodeBlock({code, language})
+- Math({tex})
+
+DO NOT WRITE ANY IMPORT STATEMENTS, ASSUME THE COMPONENTS TO BE IMPORTED GLOBALLY, JUST USE THEM NORMALLY
+
+## SVG GENERATION RULES
+
+You have access to a tool:
+
+    generate_svg({ prompt })
+
+Use this tool to generate **educational SVG diagrams** whenever a diagram would help understanding.
+
+Examples of when to call 'generate_svg':
+- force arrows, vectors, motion diagrams
+- geometry shapes
+- number lines
+- coordinate grid visualizations
+- free body diagrams
+- projectile motion arcs
+- physics conceptual explanations
+- math relationships or annotated shapes
+- algorithm diagrams or flowcharts
+
+Do NOT call generate_svg unless the diagram is directly useful.
+
+### After the tool returns the SVG:
+
+You MUST continue generating and embed the returned SVG in your component like this:
+
+    <div dangerouslySetInnerHTML={{ __html: \`\${svg_from_tool}\` }} />
+
+or wrap it in a component if needed.
+
+IMPORTANT: After calling any tools, you MUST output the complete LessonComponent function with the tool results incorporated.
+
+Now generate the component for: ${objective}
+
+Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`;
+      } else {
+        // Subsequent retry attempts within the same run
+        prompt = `The following React TSX component failed to compile or render:
+
+Error: ${lastErr}
+
+Broken Code:
+${generated_code}
+
+Fix it and output a **working corrected version** of the same component.
+Rules:
+- Keep the same function name (LessonComponent)
+- Return only the function code
+- It must compile and render without error.`;
+      }
+
+      const result = await generateText({
         model: vercel("v0-1.5-md"),
         prompt: prompt,
         temperature: 0.6,
         maxOutputTokens: 10000,
+        maxSteps: 5, // Allow up to 5 steps for tool calls and continuation
+        tools: { generate_svg: generate_svg_tool },
       });
 
-      generated_code = text
+      console.log("Generation steps:", result.steps?.length || 0);
+      console.log("Tool calls made:", result.toolCalls?.length || 0);
+
+      // Log tool results for debugging
+      if (result.toolResults && result.toolResults.length > 0) {
+        console.log(
+          "Tool results:",
+          JSON.stringify(result.toolResults, null, 2),
+        );
+      }
+
+      // Extract the final text after all tool calls
+      generated_code = result.text
         .replace(/```typescript\n?/g, "")
         .replace(/```tsx\n?/g, "")
         .replace(/```javascript\n?/g, "")
         .replace(/```jsx\n?/g, "")
         .replace(/```\n?/g, "")
         .trim();
+
+      // If no component code generated, log the issue
+      if (!generated_code.includes("function LessonComponent")) {
+        console.error("No LessonComponent found in generated code!");
+        console.error("Full response:", result.text);
+        lastErr = "Model did not generate a LessonComponent function";
+        continue;
+      }
 
       let compiled: string;
 
@@ -178,6 +369,7 @@ export const generateLesson = inngest.createFunction(
           .update({
             compiled_js_url: urlData.publicUrl,
             status: "completed",
+            error: null, // Clear any previous errors
           })
           .eq("id", lesson_id);
 
@@ -196,41 +388,6 @@ export const generateLesson = inngest.createFunction(
         console.warn(lastErr);
         continue;
       }
-
-      // let Component: any;
-      // try {
-      //   console.log("generating react component\n\n");
-
-      //   const vm = new NodeVM({
-      //     sandbox: { React },
-      //     require: { external: false },
-      //     timeout: 2000,
-      //   });
-      //   const exports = vm.run(compiled, "lesson.js");
-      //   Component = exports?.LessonComponent ?? exports?.default;
-
-      //   console.log("generated react component : ", Component, "\n\n");
-      // } catch (err: any) {
-      //   lastErr = `Runtime error : ${err.message}`;
-      //   console.warn(lastErr);
-      //   continue;
-      // }
-
-      // try {
-      //   const { renderToString } = await import("react-dom/server");
-      //   html = renderToString(React.createElement(Component));
-      //   await supabase
-      //     .from("lessons")
-      //     .update({ status: "completed" })
-      //     .eq("id", lesson_id);
-      // } catch (err: any) {
-      //   console.warn("Rendering error : ", err.message);
-      //   await supabase
-      //     .from("lessons")
-      //     .update({ status: "failed" })
-      //     .eq("id", lesson_id);
-      // }
-      //
     }
 
     const { error: failError } = await supabase

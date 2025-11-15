@@ -2,6 +2,20 @@
 
 import { use, useEffect, useState } from "react";
 import React from "react";
+import * as RegistryComponents from "@/components/registry";
+
+const {
+  Box,
+  Text,
+  Callout,
+  Calculator,
+  AnimatedCard,
+  SVGCanvas,
+  Math,
+  Timeline,
+  Quiz,
+  CodeBlock,
+} = RegistryComponents;
 
 export default function LessonPage({
   params,
@@ -43,10 +57,11 @@ export default function LessonPage({
             "",
           );
 
-        // Wrap the code to inject React
+        // Wrap the code to inject React and registry components
         const wrappedCode = `
 const React = window.__REACT__;
 const { useState, useEffect, useCallback, useMemo, useRef } = React;
+const { Box, Text, Callout, Calculator, AnimatedCard, SVGCanvas, Math, Timeline, Quiz, CodeBlock, Graph } = window.__REGISTRY__;
 
 ${codeWithoutImports}
 
@@ -54,8 +69,9 @@ export default LessonComponent
 
 `;
 
-        // Expose React globally for the dynamic module
+        // Expose React and registry components globally for the dynamic module
         (window as any).__REACT__ = React;
+        (window as any).__REGISTRY__ = RegistryComponents;
 
         // Create a blob URL from the code
         const blob = new Blob([wrappedCode], {
@@ -68,7 +84,6 @@ export default LessonComponent
 
         // Clean up
         URL.revokeObjectURL(url);
-        delete (window as any).__REACT__;
 
         // Get the component
         const Component = mod.LessonComponent || mod.default;

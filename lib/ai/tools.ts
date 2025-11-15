@@ -10,6 +10,7 @@ import { Database } from "@/lib/types";
 const { generateObject } = wrapAISDK(ai);
 
 export const generateCoursePlan = tool({
+  name: "generate_course_plan",
   description: "Break a topic into multiple structured lessons",
   inputSchema: z.object({
     outline: z
@@ -113,5 +114,50 @@ Generate the course structure now.`,
       success: true,
       message: `Created Course ${object.topic} with ${lessons.length} lessons`,
     };
+  },
+});
+
+export const generate_svg_tool = tool({
+  name: "generate_svg",
+  description: "Generate a clean educational SVG diagram",
+  inputSchema: z.object({
+    prompt: z
+      .string()
+      .describe(
+        "Detailed instructions describing what the diagram should show",
+      ),
+  }),
+  execute: async ({ prompt }) => {
+    // INTERNAL strict SVG generation prompt
+    const svgDirective = `
+You are an SVG diagram generator.
+
+Your ONLY task is to output a SINGLE <svg> element that contains the diagram.
+
+HARD REQUIREMENTS:
+- Output ONLY valid inline SVG markup.
+- The ENTIRE response MUST be exactly: <svg> ... </svg>
+- NO backticks, NO markdown, NO explanations, NO comments.
+- Black 2px strokes only.
+- No gradients, filters, clipPaths, masks, CSS, <defs>, external references.
+- Use simple primitives only: <line>, <circle>, <rect>, <path>, <polygon>.
+- Center the diagram and make it readable.
+- Use explicit width="600" height="300" and a matching viewBox.
+
+User diagram request:
+${prompt}
+    `.trim();
+
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: z.object({
+        svg: z
+          .string()
+          .describe("The final SVG diagram. Must be a single <svg> element."),
+      }),
+      prompt: svgDirective,
+    });
+
+    return { svg: object.svg };
   },
 });

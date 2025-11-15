@@ -32,6 +32,7 @@ Always acknowledge the course creation and provide details about the generated l
       },
     },
     stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
+    experimental_transform: ai.smoothStream(),
   });
 
   return result.toUIMessageStreamResponse();
