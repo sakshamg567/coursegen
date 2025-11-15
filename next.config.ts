@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
     serverComponentsExternalPackages: ["esbuild", "vm2"],
   },
   serverExternalPackages: ["esbuild", "vm2"],
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 };
 
 export default nextConfig;

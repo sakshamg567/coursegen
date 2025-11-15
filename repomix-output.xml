@@ -44,72 +44,56 @@ The content is organized as follows:
 
 <directory_structure>
 app/
-  ai/
-    tools.ts
   api/
     chat/
       route.ts
-  auth/
-    confirm/
+    inngest/
       route.ts
-    error/
+    lesson/
+      [id]/
+        route.ts
+      retry/
+        route.ts
+  hooks/
+    useChatPersistence.ts
+    useUser.ts
+  lesson/
+    [id]/
       page.tsx
-    forgot-password/
-      page.tsx
-    login/
-      page.tsx
-    sign-up/
-      page.tsx
-    sign-up-success/
-      page.tsx
-    update-password/
-      page.tsx
-  lib/
-    types.ts
-  protected/
-    layout.tsx
-    page.tsx
   globals.css
   layout.tsx
   page.tsx
 components/
-  tutorial/
-    code-block.tsx
-    connect-supabase-steps.tsx
-    fetch-data-steps.tsx
-    sign-up-user-steps.tsx
-    tutorial-step.tsx
   ui/
     badge.tsx
     button.tsx
+    CalculatorUI.tsx
     card.tsx
     checkbox.tsx
+    collapsible.tsx
     dropdown-menu.tsx
     input.tsx
     label.tsx
-  auth-button.tsx
-  deploy-button.tsx
-  env-var-warning.tsx
-  forgot-password-form.tsx
-  hero.tsx
-  login-form.tsx
-  logout-button.tsx
-  next-logo.tsx
-  sign-up-form.tsx
-  supabase-logo.tsx
-  theme-switcher.tsx
-  update-password-form.tsx
-  weather.tsx
+    LessonDisp.tsx
+    QuizComponent.tsx
+  registry.tsx
+inngest/
+  client.ts
+  functions.ts
 lib/
+  ai/
+    index.ts
+    prompt.ts
+    tools.ts
   supabase/
     client.ts
     middleware.ts
     server.ts
+  types.ts
   utils.ts
 .gitignore
 components.json
 eslint.config.mjs
-middleware.ts
 next.config.ts
 package.json
 postcss.config.mjs
@@ -121,471 +105,173 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/ai/tools.ts">
-import z from "zod";
-import { tool } from "ai";
-import * as ai from "ai";
-import { google } from "@ai-sdk/google";
-import { wrapAISDK } from "langsmith/experimental/vercel";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+<file path="components/ui/collapsible.tsx">
+"use client"
 
-// Use service role for server-side operations
-// If you don't have service role, you can use the regular server client
-// but make sure you have proper RLS policies
-const supabase = createSupabaseClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  },
-);
+import * as CollapsiblePrimitive from "@radix-ui/react-collapsible"
 
-const { generateObject } = wrapAISDK(ai);
+function Collapsible({
+  ...props
+}: React.ComponentProps<typeof CollapsiblePrimitive.Root>) {
+  return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
+}
 
-export const generateCoursePlan = tool({
-  description: "Break a topic into multiple structured lessons",
-  inputSchema: z.object({
-    outline: z
-      .string()
-      .describe("The outline of the course provided by the user"),
-    lesson_count: z.number().describe("Number of lessons to generate"),
-  }),
-  execute: async function ({ outline, lesson_count }) {
-    console.log("Generating course plan for:", {
-      outline,
-      lesson_count,
-    });
+function CollapsibleTrigger({
+  ...props
+}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleTrigger>) {
+  return (
+    <CollapsiblePrimitive.CollapsibleTrigger
+      data-slot="collapsible-trigger"
+      {...props}
+    />
+  )
+}
 
-    const { object } = await generateObject({
-      model: google("gemini-flash-latest"),
-      schema: z.object({
-        topic: z
-          .string()
-          .describe(
-            "50-80 Words title for the course based on provided outline",
-          ),
-        lessons: z.array(
-          z.object({
-            title: z.string().describe("The title of the topic to generate"),
-            objective: z.string().describe("Learning objective of the lesson"),
-          }),
-        ),
-      }),
-      prompt: `Create a course breakdown for the following outline:
+function CollapsibleContent({
+  ...props
+}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleContent>) {
+  return (
+    <CollapsiblePrimitive.CollapsibleContent
+      data-slot="collapsible-content"
+      {...props}
+    />
+  )
+}
 
-"${outline}"
+export { Collapsible, CollapsibleTrigger, CollapsibleContent }
+</file>
 
-Generate exactly ${lesson_count} lessons that cover this topic comprehensively.
-Each lesson should have a clear title and specific learning objective.
+<file path="app/api/inngest/route.ts">
+import { serve } from "inngest/next";
+import { inngest } from "../../../inngest/client";
+import { generateLesson } from "@/inngest/functions";
 
-Course Outline: ${outline}
-Number of Lessons: ${lesson_count}
-
-Generate the course structure now.`,
-    });
-
-    console.log("Generated course plan:", JSON.stringify(object, null, 2));
-
-    // Insert into Supabase
-    const userId = "1234";
-    const { data, error } = await supabase
-      .from("courses")
-      .insert({
-        topic: object.topic,
-        outline: outline,
-        user_id: userId,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error inserting course:", error);
-      throw new Error(`Failed to store course: ${error.message}`);
-    }
-
-    console.log("Course stored in Supabase:", data);
-
-    return {
-      course_plan: object,
-      course_id: data?.id,
-      success: true,
-    };
-  },
+// Create an API that serves zero functions
+export const { GET, POST, PUT } = serve({
+  client: inngest,
+  functions: [generateLesson],
 });
 </file>
 
-<file path="app/api/chat/route.ts">
-import { generateCoursePlan } from "@/app/ai/tools";
-import { google } from "@ai-sdk/google";
-import * as ai from "ai";
-import { stepCountIs } from "ai";
-import { wrapAISDK } from "langsmith/experimental/vercel";
-
-const { streamText } = wrapAISDK(ai);
-
-export async function POST(req: Request) {
-  const { messages, userId }: { messages: ai.UIMessage[]; userId: string } =
-    await req.json();
-  console.log("userId: ", userId);
-
-  const result = streamText({
-    model: google("gemini-flash-latest"),
-    system: `You are a helpful educational assistant that helps users create structured courses.
-
-When a user asks to create a course or lessons, you MUST:
-0. Just generate some pretext, like whatever, a bit about topic 2-3 liners are enough.
-1. Call the generateCoursePlan
-2. Wait for the tool result
-3. Explain to the user what was created based on the tool output
-4. Include the course_id from the tool result in your response
-
-Always acknowledge the course creation and provide details about the generated lessons.`,
-    messages: ai.convertToModelMessages(messages),
-    tools: {
-      generateCoursePlan,
-    },
-    stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
-  });
-
-  return result.toUIMessageStreamResponse();
-}
-</file>
-
-<file path="app/auth/confirm/route.ts">
+<file path="app/api/lesson/[id]/route.ts">
 import { createClient } from "@/lib/supabase/server";
-import { type EmailOtpType } from "@supabase/supabase-js";
-import { redirect } from "next/navigation";
-import { type NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const token_hash = searchParams.get("token_hash");
-  const type = searchParams.get("type") as EmailOtpType | null;
-  const next = searchParams.get("next") ?? "/";
-
-  if (token_hash && type) {
-    const supabase = await createClient();
-
-    const { error } = await supabase.auth.verifyOtp({
-      type,
-      token_hash,
-    });
-    if (!error) {
-      // redirect user to specified redirect URL or root of app
-      redirect(next);
-    } else {
-      // redirect the user to an error page with some instructions
-      redirect(`/auth/error?error=${error?.message}`);
-    }
-  }
-
-  // redirect the user to an error page with some instructions
-  redirect(`/auth/error?error=No token hash or type`);
-}
-</file>
-
-<file path="app/auth/error/page.tsx">
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-export default async function Page({
-  searchParams,
-}: {
-  searchParams: Promise<{ error: string }>;
-}) {
-  const params = await searchParams;
-
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">
-                Sorry, something went wrong.
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {params?.error ? (
-                <p className="text-sm text-muted-foreground">
-                  Code error: {params.error}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  An unspecified error occurred.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/auth/forgot-password/page.tsx">
-import { ForgotPasswordForm } from "@/components/forgot-password-form";
-
-export default function Page() {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <ForgotPasswordForm />
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/auth/login/page.tsx">
-import { LoginForm } from "@/components/login-form";
-
-export default function Page() {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <LoginForm />
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/auth/sign-up/page.tsx">
-import { SignUpForm } from "@/components/sign-up-form";
-
-export default function Page() {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <SignUpForm />
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/auth/sign-up-success/page.tsx">
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-export default function Page() {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">
-                Thank you for signing up!
-              </CardTitle>
-              <CardDescription>Check your email to confirm</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                You&apos;ve successfully signed up. Please check your email to
-                confirm your account before signing in.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/auth/update-password/page.tsx">
-import { UpdatePasswordForm } from "@/components/update-password-form";
-
-export default function Page() {
-  return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <UpdatePasswordForm />
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="app/lib/types.ts">
-export interface Course {
-  user_id: string;
-  topic: string;
-  status: "planning" | "preparing" | "completed";
-  trace_id: string;
-}
-</file>
-
-<file path="app/protected/layout.tsx">
-import { DeployButton } from "@/components/deploy-button";
-import { EnvVarWarning } from "@/components/env-var-warning";
-import { AuthButton } from "@/components/auth-button";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { hasEnvVars } from "@/lib/utils";
-import Link from "next/link";
-
-export default function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <main className="min-h-screen flex flex-col items-center">
-      <div className="flex-1 w-full flex flex-col gap-20 items-center">
-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-          <div className="w-full max-w-5xl flex justify-between items-center p-3 px-5 text-sm">
-            <div className="flex gap-5 items-center font-semibold">
-              <Link href={"/"}>Next.js Supabase Starter</Link>
-              <div className="flex items-center gap-2">
-                <DeployButton />
-              </div>
-            </div>
-            {!hasEnvVars ? <EnvVarWarning /> : <AuthButton />}
-          </div>
-        </nav>
-        <div className="flex-1 flex flex-col gap-20 max-w-5xl p-5">
-          {children}
-        </div>
-
-        <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
-          <p>
-            Powered by{" "}
-            <a
-              href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
-              target="_blank"
-              className="font-bold hover:underline"
-              rel="noreferrer"
-            >
-              Supabase
-            </a>
-          </p>
-          <ThemeSwitcher />
-        </footer>
-      </div>
-    </main>
-  );
-}
-</file>
-
-<file path="app/protected/page.tsx">
-import { redirect } from "next/navigation";
-
-import { createClient } from "@/lib/supabase/server";
-import { InfoIcon } from "lucide-react";
-import { FetchDataSteps } from "@/components/tutorial/fetch-data-steps";
-
-export default async function ProtectedPage() {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   const supabase = await createClient();
 
-  const { data, error } = await supabase.auth.getClaims();
-  if (error || !data?.claims) {
-    redirect("/auth/login");
+  // Fetch the lesson from database
+  const { data: lesson, error } = await supabase
+    .from("lessons")
+    .select("compiled_js_url")
+    .eq("id", id)
+    .single();
+
+  if (error || !lesson?.compiled_js_url) {
+    return new NextResponse("Lesson not found", { status: 404 });
   }
 
-  return (
-    <div className="flex-1 w-full flex flex-col gap-12">
-      <div className="w-full">
-        <div className="bg-accent text-sm p-3 px-5 rounded-md text-foreground flex gap-3 items-center">
-          <InfoIcon size="16" strokeWidth={2} />
-          This is a protected page that you can only see as an authenticated
-          user
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 items-start">
-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
-        <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
-          {JSON.stringify(data.claims, null, 2)}
-        </pre>
-      </div>
-      <div>
-        <h2 className="font-bold text-2xl mb-4">Next steps</h2>
-        <FetchDataSteps />
-      </div>
-    </div>
+  // Fetch the compiled code from storage
+  const response = await fetch(lesson.compiled_js_url);
+
+  if (!response.ok) {
+    return new NextResponse("Failed to fetch compiled code", { status: 500 });
+  }
+
+  let compiled = await response.text();
+
+  // Replace the React import with a CDN version
+  compiled = compiled.replace(
+    /import\s+React\s+from\s+['"]react['"]/g,
+    `import React from 'https://esm.sh/react@18'`,
   );
+  compiled = compiled.replace(
+    /import\s+{([^}]+)}\s+from\s+['"]react['"]/g,
+    `import {$1} from 'https://esm.sh/react@18'`,
+  );
+
+  return new NextResponse(compiled, {
+    headers: {
+      "Content-Type": "application/javascript",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
 }
 </file>
 
-<file path="app/globals.css">
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+<file path="app/hooks/useChatPersistence.ts">
+const CHAT_STORAGE_KEY = "ai-course-chat-messages";
+const CHAT_VERSION = "1"; // Increment this if message structure changes
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
-  }
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+interface StoredChat {
+  version: string;
+  messages: any[];
+  timestamp: number;
+}
+
+export function loadMessagesFromStorage(): any[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const stored = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!stored) return [];
+
+    const parsed: StoredChat = JSON.parse(stored);
+
+    // Check version compatibility
+    if (parsed.version !== CHAT_VERSION) {
+      console.log("Chat version mismatch, clearing old messages");
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+      return [];
+    }
+
+    // Check if messages are less than 24 hours old
+    const hoursSinceLastMessage =
+      (Date.now() - parsed.timestamp) / (1000 * 60 * 60);
+    if (hoursSinceLastMessage > 24) {
+      console.log("Chat messages expired (>24h), clearing");
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+      return [];
+    }
+
+    console.log("Loaded", parsed.messages.length, "messages from localStorage");
+    return parsed.messages || [];
+  } catch (error) {
+    console.error("Failed to load chat messages:", error);
+    return [];
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+export function clearChatHistory() {
+  localStorage.removeItem(CHAT_STORAGE_KEY);
 }
+</file>
+
+<file path="app/hooks/useUser.ts">
+"use client";
+import { useEffect, useState } from "react";
+import { v4 } from "uuid";
+
+export const useUser = () => {
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let id = localStorage.getItem("userId");
+
+    if (!id) {
+      id = v4();
+      localStorage.setItem("userId", id);
+    }
+
+    setUserId(id);
+  }, []);
+
+  return userId;
+};
 </file>
 
 <file path="app/layout.tsx">
@@ -628,612 +314,6 @@ export default function RootLayout({
         </ThemeProvider>
       </body>
     </html>
-  );
-}
-</file>
-
-<file path="app/page.tsx">
-"use client";
-
-import { useChat } from "@ai-sdk/react";
-import { useState } from "react";
-import { Weather } from "@/components/weather";
-import { DefaultChatTransport } from "ai";
-
-export default function Page() {
-  const [input, setInput] = useState("");
-  const userId = "1234";
-  const { messages, sendMessage } = useChat({
-    transport: new DefaultChatTransport({
-      body: { userId },
-    }),
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    sendMessage({ text: input });
-    setInput("");
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8 text-gray-900 dark:text-white">
-          AI Course Generator
-        </h1>
-
-        {/* Messages */}
-        <div className="space-y-4 mb-6">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`p-4 rounded-lg ${
-                message.role === "user"
-                  ? "bg-blue-100 dark:bg-blue-900 ml-12"
-                  : "bg-white dark:bg-gray-800 mr-12"
-              }`}
-            >
-              <div className="font-semibold mb-2 text-gray-900 dark:text-white">
-                {message.role === "user" ? "You" : "AI"}
-              </div>
-              <div className="text-gray-800 dark:text-gray-200">
-                {message.parts.map((part, index) => {
-                  // Text content
-                  if (part.type === "text") {
-                    return <div key={index}>{part.text}</div>;
-                  }
-
-                  // Weather tool (keep your existing one)
-                  if (part.type === "tool-displayWeather") {
-                    switch (part.state) {
-                      case "input-available":
-                        return <div key={index}>Loading weather...</div>;
-                      case "output-available":
-                        return (
-                          <div key={index}>
-                            <Weather {...part.output} />
-                          </div>
-                        );
-                      case "output-error":
-                        return <div key={index}>Error: {part.errorText}</div>;
-                      default:
-                        return null;
-                    }
-                  }
-
-                  // Course generation tool
-                  if (part.type === "tool-generateCoursePlan") {
-                    switch (part.state) {
-                      case "input-available":
-                        return (
-                          <div
-                            key={index}
-                            className="flex items-center gap-2 text-blue-600 dark:text-blue-400"
-                          >
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                            Generating course plan...
-                          </div>
-                        );
-                      case "output-available":
-                        return (
-                          <CoursePlanDisplay key={index} output={part.output} />
-                        );
-                      case "output-error":
-                        return (
-                          <div
-                            key={index}
-                            className="text-red-600 dark:text-red-400"
-                          >
-                            Error: {part.errorText}
-                          </div>
-                        );
-                      default:
-                        return null;
-                    }
-                  }
-
-                  return null;
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Input Form */}
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder='Try: "Create a course on Python with 5 lessons"'
-            className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-          />
-          <button
-            type="submit"
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
-          >
-            Send
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Component to display course plan
-function CoursePlanDisplay({ output }: { output: any }) {
-  const { course_plan, course_id, success } = output;
-
-  if (!success || !course_plan) {
-    return (
-      <div className="text-red-600 dark:text-red-400">
-        Failed to generate course plan
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-      <div className="flex items-center gap-2 mb-3">
-        <svg
-          className="w-5 h-5 text-green-600"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        <span className="font-semibold text-green-800 dark:text-green-200">
-          Course Created! ID: {course_id}
-        </span>
-      </div>
-
-      <h3 className="font-bold text-lg mb-2 text-gray-900 dark:text-white">
-        {course_plan.topic}
-      </h3>
-
-      <div className="space-y-3">
-        {course_plan.lessons.map((lesson: any, idx: number) => (
-          <div
-            key={idx}
-            className="p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
-          >
-            <div className="font-medium text-gray-900 dark:text-white">
-              Lesson {idx + 1}: {lesson.title}
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              {lesson.objective}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="components/tutorial/code-block.tsx">
-"use client";
-
-import { useState } from "react";
-import { Button } from "../ui/button";
-
-const CopyIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <polyline points="20 6 9 17 4 12"></polyline>
-  </svg>
-);
-
-export function CodeBlock({ code }: { code: string }) {
-  const [icon, setIcon] = useState(CopyIcon);
-
-  const copy = async () => {
-    await navigator?.clipboard?.writeText(code);
-    setIcon(CheckIcon);
-    setTimeout(() => setIcon(CopyIcon), 2000);
-  };
-
-  return (
-    <pre className="bg-muted rounded-md p-6 my-6 relative">
-      <Button
-        size="icon"
-        onClick={copy}
-        variant={"outline"}
-        className="absolute right-2 top-2"
-      >
-        {icon}
-      </Button>
-      <code className="text-xs p-3">{code}</code>
-    </pre>
-  );
-}
-</file>
-
-<file path="components/tutorial/connect-supabase-steps.tsx">
-import { TutorialStep } from "./tutorial-step";
-
-export function ConnectSupabaseSteps() {
-  return (
-    <ol className="flex flex-col gap-6">
-      <TutorialStep title="Create Supabase project">
-        <p>
-          Head over to{" "}
-          <a
-            href="https://app.supabase.com/project/_/settings/api"
-            target="_blank"
-            className="font-bold hover:underline text-foreground/80"
-            rel="noreferrer"
-          >
-            database.new
-          </a>{" "}
-          and create a new Supabase project.
-        </p>
-      </TutorialStep>
-
-      <TutorialStep title="Declare environment variables">
-        <p>
-          Rename the{" "}
-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-            .env.example
-          </span>{" "}
-          file in your Next.js app to{" "}
-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-            .env.local
-          </span>{" "}
-          and populate with values from{" "}
-          <a
-            href="https://app.supabase.com/project/_/settings/api"
-            target="_blank"
-            className="font-bold hover:underline text-foreground/80"
-            rel="noreferrer"
-          >
-            your Supabase project&apos;s API Settings
-          </a>
-          .
-        </p>
-      </TutorialStep>
-
-      <TutorialStep title="Restart your Next.js development server">
-        <p>
-          You may need to quit your Next.js development server and run{" "}
-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-            npm run dev
-          </span>{" "}
-          again to load the new environment variables.
-        </p>
-      </TutorialStep>
-
-      <TutorialStep title="Refresh the page">
-        <p>
-          You may need to refresh the page for Next.js to load the new
-          environment variables.
-        </p>
-      </TutorialStep>
-    </ol>
-  );
-}
-</file>
-
-<file path="components/tutorial/fetch-data-steps.tsx">
-import { TutorialStep } from "./tutorial-step";
-import { CodeBlock } from "./code-block";
-
-const create = `create table notes (
-  id bigserial primary key,
-  title text
-);
-
-insert into notes(title)
-values
-  ('Today I created a Supabase project.'),
-  ('I added some data and queried it from Next.js.'),
-  ('It was awesome!');
-`.trim();
-
-const rls = `alter table notes enable row level security;
-create policy "Allow public read access" on notes
-for select
-using (true);`.trim();
-
-const server = `import { createClient } from '@/lib/supabase/server'
-
-export default async function Page() {
-  const supabase = await createClient()
-  const { data: notes } = await supabase.from('notes').select()
-
-  return <pre>{JSON.stringify(notes, null, 2)}</pre>
-}
-`.trim();
-
-const client = `'use client'
-
-import { createClient } from '@/lib/supabase/client'
-import { useEffect, useState } from 'react'
-
-export default function Page() {
-  const [notes, setNotes] = useState<any[] | null>(null)
-  const supabase = createClient()
-
-  useEffect(() => {
-    const getData = async () => {
-      const { data } = await supabase.from('notes').select()
-      setNotes(data)
-    }
-    getData()
-  }, [])
-
-  return <pre>{JSON.stringify(notes, null, 2)}</pre>
-}
-`.trim();
-
-export function FetchDataSteps() {
-  return (
-    <ol className="flex flex-col gap-6">
-      <TutorialStep title="Create some tables and insert some data">
-        <p>
-          Head over to the{" "}
-          <a
-            href="https://supabase.com/dashboard/project/_/editor"
-            className="font-bold hover:underline text-foreground/80"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Table Editor
-          </a>{" "}
-          for your Supabase project to create a table and insert some example
-          data. If you&apos;re stuck for creativity, you can copy and paste the
-          following into the{" "}
-          <a
-            href="https://supabase.com/dashboard/project/_/sql/new"
-            className="font-bold hover:underline text-foreground/80"
-            target="_blank"
-            rel="noreferrer"
-          >
-            SQL Editor
-          </a>{" "}
-          and click RUN!
-        </p>
-        <CodeBlock code={create} />
-      </TutorialStep>
-
-      <TutorialStep title="Enable Row Level Security (RLS)">
-        <p>
-          Supabase enables Row Level Security (RLS) by default. To query data
-          from your <code>notes</code> table, you need to add a policy. You can
-          do this in the{" "}
-          <a
-            href="https://supabase.com/dashboard/project/_/editor"
-            className="font-bold hover:underline text-foreground/80"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Table Editor
-          </a>{" "}
-          or via the{" "}
-          <a
-            href="https://supabase.com/dashboard/project/_/sql/new"
-            className="font-bold hover:underline text-foreground/80"
-            target="_blank"
-            rel="noreferrer"
-          >
-            SQL Editor
-          </a>
-          .
-        </p>
-        <p>
-          For example, you can run the following SQL to allow public read
-          access:
-        </p>
-        <CodeBlock code={rls} />
-        <p>
-          You can learn more about RLS in the{" "}
-          <a
-            href="https://supabase.com/docs/guides/auth/row-level-security"
-            className="font-bold hover:underline text-foreground/80"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Supabase docs
-          </a>
-          .
-        </p>
-      </TutorialStep>
-
-      <TutorialStep title="Query Supabase data from Next.js">
-        <p>
-          To create a Supabase client and query data from an Async Server
-          Component, create a new page.tsx file at{" "}
-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-            /app/notes/page.tsx
-          </span>{" "}
-          and add the following.
-        </p>
-        <CodeBlock code={server} />
-        <p>Alternatively, you can use a Client Component.</p>
-        <CodeBlock code={client} />
-      </TutorialStep>
-
-      <TutorialStep title="Explore the Supabase UI Library">
-        <p>
-          Head over to the{" "}
-          <a
-            href="https://supabase.com/ui"
-            className="font-bold hover:underline text-foreground/80"
-          >
-            Supabase UI library
-          </a>{" "}
-          and try installing some blocks. For example, you can install a
-          Realtime Chat block by running:
-        </p>
-        <CodeBlock
-          code={
-            "npx shadcn@latest add https://supabase.com/ui/r/realtime-chat-nextjs.json"
-          }
-        />
-      </TutorialStep>
-
-      <TutorialStep title="Build in a weekend and scale to millions!">
-        <p>You&apos;re ready to launch your product to the world! 🚀</p>
-      </TutorialStep>
-    </ol>
-  );
-}
-</file>
-
-<file path="components/tutorial/sign-up-user-steps.tsx">
-import Link from "next/link";
-import { TutorialStep } from "./tutorial-step";
-import { ArrowUpRight } from "lucide-react";
-
-export function SignUpUserSteps() {
-  return (
-    <ol className="flex flex-col gap-6">
-      {process.env.VERCEL_ENV === "preview" ||
-      process.env.VERCEL_ENV === "production" ? (
-        <TutorialStep title="Set up redirect urls">
-          <p>It looks like this App is hosted on Vercel.</p>
-          <p className="mt-4">
-            This particular deployment is
-            <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-              &quot;{process.env.VERCEL_ENV}&quot;
-            </span>{" "}
-            on
-            <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-              https://{process.env.VERCEL_URL}
-            </span>
-            .
-          </p>
-          <p className="mt-4">
-            You will need to{" "}
-            <Link
-              className="text-primary hover:text-foreground"
-              href={
-                "https://supabase.com/dashboard/project/_/auth/url-configuration"
-              }
-            >
-              update your Supabase project
-            </Link>{" "}
-            with redirect URLs based on your Vercel deployment URLs.
-          </p>
-          <ul className="mt-4">
-            <li>
-              -{" "}
-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-                http://localhost:3000/**
-              </span>
-            </li>
-            <li>
-              -{" "}
-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-                {`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}/**`}
-              </span>
-            </li>
-            <li>
-              -{" "}
-              <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-                {`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL?.replace(
-                  ".vercel.app",
-                  "",
-                )}-*-[vercel-team-url].vercel.app/**`}
-              </span>{" "}
-              (Vercel Team URL can be found in{" "}
-              <Link
-                className="text-primary hover:text-foreground"
-                href="https://vercel.com/docs/accounts/create-a-team#find-your-team-id"
-                target="_blank"
-              >
-                Vercel Team settings
-              </Link>
-              )
-            </li>
-          </ul>
-          <Link
-            href="https://supabase.com/docs/guides/auth/redirect-urls#vercel-preview-urls"
-            target="_blank"
-            className="text-primary/50 hover:text-primary flex items-center text-sm gap-1 mt-4"
-          >
-            Redirect URLs Docs <ArrowUpRight size={14} />
-          </Link>
-        </TutorialStep>
-      ) : null}
-      <TutorialStep title="Sign up your first user">
-        <p>
-          Head over to the{" "}
-          <Link
-            href="auth/sign-up"
-            className="font-bold hover:underline text-foreground/80"
-          >
-            Sign up
-          </Link>{" "}
-          page and sign up your first user. It&apos;s okay if this is just you
-          for now. Your awesome idea will have plenty of users later!
-        </p>
-      </TutorialStep>
-    </ol>
-  );
-}
-</file>
-
-<file path="components/tutorial/tutorial-step.tsx">
-import { Checkbox } from "../ui/checkbox";
-
-export function TutorialStep({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <li className="relative">
-      <Checkbox
-        id={title}
-        name={title}
-        className={`absolute top-[3px] mr-2 peer`}
-      />
-      <label
-        htmlFor={title}
-        className={`relative text-base text-foreground peer-checked:line-through font-medium`}
-      >
-        <span className="ml-8">{title}</span>
-        <div
-          className={`ml-8 text-sm peer-checked:line-through font-normal text-muted-foreground`}
-        >
-          {children}
-        </div>
-      </label>
-    </li>
   );
 }
 </file>
@@ -1714,831 +794,371 @@ Label.displayName = LabelPrimitive.Root.displayName;
 export { Label };
 </file>
 
-<file path="components/auth-button.tsx">
-import Link from "next/link";
-import { Button } from "./ui/button";
-import { createClient } from "@/lib/supabase/server";
-import { LogoutButton } from "./logout-button";
-
-export async function AuthButton() {
-  const supabase = await createClient();
-
-  // You can also use getUser() which will be slower.
-  const { data } = await supabase.auth.getClaims();
-
-  const user = data?.claims;
-
-  return user ? (
-    <div className="flex items-center gap-4">
-      Hey, {user.email}!
-      <LogoutButton />
-    </div>
-  ) : (
-    <div className="flex gap-2">
-      <Button asChild size="sm" variant={"outline"}>
-        <Link href="/auth/login">Sign in</Link>
-      </Button>
-      <Button asChild size="sm" variant={"default"}>
-        <Link href="/auth/sign-up">Sign up</Link>
-      </Button>
-    </div>
-  );
-}
-</file>
-
-<file path="components/deploy-button.tsx">
-import Link from "next/link";
-import { Button } from "./ui/button";
-
-export function DeployButton() {
-  return (
-    <>
-      <Link
-        href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png"
-        target="_blank"
-      >
-        <Button className="flex items-center gap-2" size="sm">
-          <svg
-            className="h-3 w-3"
-            viewBox="0 0 76 65"
-            fill="hsl(var(--background)/1)"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" fill="inherit" />
-          </svg>
-          <span>Deploy to Vercel</span>
-        </Button>
-      </Link>
-    </>
-  );
-}
-</file>
-
-<file path="components/env-var-warning.tsx">
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-
-export function EnvVarWarning() {
-  return (
-    <div className="flex gap-4 items-center">
-      <Badge variant={"outline"} className="font-normal">
-        Supabase environment variables required
-      </Badge>
-      <div className="flex gap-2">
-        <Button size="sm" variant={"outline"} disabled>
-          Sign in
-        </Button>
-        <Button size="sm" variant={"default"} disabled>
-          Sign up
-        </Button>
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="components/forgot-password-form.tsx">
-"use client";
-
-import { cn } from "@/lib/utils";
+<file path="components/ui/LessonDisp.tsx">
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { useState } from "react";
-
-export function ForgotPasswordForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
-      });
-      if (error) throw error;
-      setSuccess(true);
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      {success ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Check Your Email</CardTitle>
-            <CardDescription>Password reset instructions sent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              If you registered using your email and password, you will receive
-              a password reset email.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-            <CardDescription>
-              Type in your email and we&apos;ll send you a link to reset your
-              password
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Sending..." : "Send reset email"}
-                </Button>
-              </div>
-              <div className="mt-4 text-center text-sm">
-                Already have an account?{" "}
-                <Link
-                  href="/auth/login"
-                  className="underline underline-offset-4"
-                >
-                  Login
-                </Link>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-</file>
-
-<file path="components/hero.tsx">
-import { NextLogo } from "./next-logo";
-import { SupabaseLogo } from "./supabase-logo";
-
-export function Hero() {
-  return (
-    <div className="flex flex-col gap-16 items-center">
-      <div className="flex gap-8 justify-center items-center">
-        <a
-          href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <SupabaseLogo />
-        </a>
-        <span className="border-l rotate-45 h-6" />
-        <a href="https://nextjs.org/" target="_blank" rel="noreferrer">
-          <NextLogo />
-        </a>
-      </div>
-      <h1 className="sr-only">Supabase and Next.js Starter Template</h1>
-      <p className="text-3xl lg:text-4xl !leading-tight mx-auto max-w-xl text-center">
-        The fastest way to build apps with{" "}
-        <a
-          href="https://supabase.com/?utm_source=create-next-app&utm_medium=template&utm_term=nextjs"
-          target="_blank"
-          className="font-bold hover:underline"
-          rel="noreferrer"
-        >
-          Supabase
-        </a>{" "}
-        and{" "}
-        <a
-          href="https://nextjs.org/"
-          target="_blank"
-          className="font-bold hover:underline"
-          rel="noreferrer"
-        >
-          Next.js
-        </a>
-      </p>
-      <div className="w-full p-[1px] bg-gradient-to-r from-transparent via-foreground/10 to-transparent my-8" />
-    </div>
-  );
-}
-</file>
-
-<file path="components/login-form.tsx">
-"use client";
-
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-export function LoginForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Login</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
-                  <Link
-                    href="/auth/forgot-password"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                  >
-                    Forgot your password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Login"}
-              </Button>
-            </div>
-            <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <Link
-                href="/auth/sign-up"
-                className="underline underline-offset-4"
-              >
-                Sign up
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-</file>
-
-<file path="components/logout-button.tsx">
-"use client";
-
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
-
-export function LogoutButton() {
-  const router = useRouter();
-
-  const logout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
-  };
-
-  return <Button onClick={logout}>Logout</Button>;
-}
-</file>
-
-<file path="components/next-logo.tsx">
-export function NextLogo() {
-  return (
-    <svg
-      aria-label="Next.js logotype"
-      height="68"
-      role="img"
-      viewBox="0 0 394 79"
-      width="100"
-    >
-      <path
-        d="M261.919 0.0330722H330.547V12.7H303.323V79.339H289.71V12.7H261.919V0.0330722Z"
-        fill="currentColor"
-      />
-      <path
-        d="M149.052 0.0330722V12.7H94.0421V33.0772H138.281V45.7441H94.0421V66.6721H149.052V79.339H80.43V12.7H80.4243V0.0330722H149.052Z"
-        fill="currentColor"
-      />
-      <path
-        d="M183.32 0.0661486H165.506L229.312 79.3721H247.178L215.271 39.7464L247.127 0.126654L229.312 0.154184L206.352 28.6697L183.32 0.0661486Z"
-        fill="currentColor"
-      />
-      <path
-        d="M201.6 56.7148L192.679 45.6229L165.455 79.4326H183.32L201.6 56.7148Z"
-        fill="currentColor"
-      />
-      <path
-        clipRule="evenodd"
-        d="M80.907 79.339L17.0151 0H0V79.3059H13.6121V16.9516L63.8067 79.339H80.907Z"
-        fill="currentColor"
-        fillRule="evenodd"
-      />
-      <path
-        d="M333.607 78.8546C332.61 78.8546 331.762 78.5093 331.052 77.8186C330.342 77.1279 329.991 76.2917 330 75.3011C329.991 74.3377 330.342 73.5106 331.052 72.8199C331.762 72.1292 332.61 71.7838 333.607 71.7838C334.566 71.7838 335.405 72.1292 336.115 72.8199C336.835 73.5106 337.194 74.3377 337.204 75.3011C337.194 75.9554 337.028 76.5552 336.696 77.0914C336.355 77.6368 335.922 78.064 335.377 78.373C334.842 78.6911 334.252 78.8546 333.607 78.8546Z"
-        fill="currentColor"
-      />
-      <path
-        d="M356.84 45.4453H362.872V68.6846C362.863 70.8204 362.401 72.6472 361.498 74.1832C360.585 75.7191 359.321 76.8914 357.698 77.7185C356.084 78.5364 354.193 78.9546 352.044 78.9546C350.079 78.9546 348.318 78.6001 346.75 77.9094C345.182 77.2187 343.937 76.1826 343.024 74.8193C342.101 73.456 341.649 71.7565 341.649 69.7207H347.691C347.7 70.6114 347.903 71.3838 348.29 72.0291C348.677 72.6744 349.212 73.1651 349.895 73.5105C350.586 73.8559 351.38 74.0286 352.274 74.0286C353.243 74.0286 354.073 73.8286 354.746 73.4196C355.419 73.0197 355.936 72.4199 356.296 71.6201C356.646 70.8295 356.831 69.8479 356.84 68.6846V45.4453Z"
-        fill="currentColor"
-      />
-      <path
-        d="M387.691 54.5338C387.544 53.1251 386.898 52.0254 385.773 51.2438C384.638 50.4531 383.172 50.0623 381.373 50.0623C380.11 50.0623 379.022 50.2532 378.118 50.6258C377.214 51.0075 376.513 51.5164 376.033 52.1617C375.554 52.807 375.314 53.5432 375.295 54.3703C375.295 55.061 375.461 55.6608 375.784 56.1607C376.107 56.6696 376.54 57.0968 377.103 57.4422C377.656 57.7966 378.274 58.0874 378.948 58.3237C379.63 58.56 380.313 58.76 380.995 58.9236L384.14 59.6961C385.404 59.9869 386.631 60.3778 387.802 60.8776C388.973 61.3684 390.034 61.9955 390.965 62.7498C391.897 63.5042 392.635 64.413 393.179 65.4764C393.723 66.5397 394 67.7848 394 69.2208C394 71.1566 393.502 72.8562 392.496 74.3285C391.491 75.7917 390.043 76.9369 388.143 77.764C386.252 78.582 383.965 79 381.272 79C378.671 79 376.402 78.6002 374.493 77.8004C372.575 77.0097 371.08 75.8463 370.001 74.3194C368.922 72.7926 368.341 70.9294 368.258 68.7391H374.235C374.318 69.8842 374.687 70.8386 375.314 71.6111C375.95 72.3745 376.78 72.938 377.795 73.3197C378.819 73.6923 379.962 73.8832 381.226 73.8832C382.545 73.8832 383.707 73.6832 384.712 73.2924C385.708 72.9016 386.492 72.3564 387.055 71.6475C387.627 70.9476 387.913 70.1206 387.922 69.1754C387.913 68.312 387.654 67.5939 387.156 67.0304C386.649 66.467 385.948 65.9944 385.053 65.6127C384.15 65.231 383.098 64.8856 381.899 64.5857L378.081 63.6223C375.323 62.9225 373.137 61.8592 371.541 60.4323C369.937 59.0054 369.143 57.115 369.143 54.7429C369.143 52.798 369.678 51.0894 370.758 49.6261C371.827 48.1629 373.294 47.0268 375.148 46.2179C377.011 45.4 379.114 45 381.456 45C383.836 45 385.92 45.4 387.719 46.2179C389.517 47.0268 390.929 48.1538 391.952 49.5897C392.976 51.0257 393.511 52.6707 393.539 54.5338H387.691Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-</file>
-
-<file path="components/sign-up-form.tsx">
-"use client";
-
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-export function SignUpForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [repeatPassword, setRepeatPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
-
-    if (password !== repeatPassword) {
-      setError("Passwords do not match");
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/protected`,
-        },
-      });
-      if (error) throw error;
-      router.push("/auth/sign-up-success");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Sign up</CardTitle>
-          <CardDescription>Create a new account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSignUp}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="repeat-password">Repeat Password</Label>
-                </div>
-                <Input
-                  id="repeat-password"
-                  type="password"
-                  required
-                  value={repeatPassword}
-                  onChange={(e) => setRepeatPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Creating an account..." : "Sign up"}
-              </Button>
-            </div>
-            <div className="mt-4 text-center text-sm">
-              Already have an account?{" "}
-              <Link href="/auth/login" className="underline underline-offset-4">
-                Login
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-</file>
-
-<file path="components/supabase-logo.tsx">
-export function SupabaseLogo() {
-  return (
-    <svg
-      aria-label="Supabase logo"
-      width="140"
-      height="30"
-      viewBox="0 0 115 23"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <g clipPath="url(#clip0_4671_51136)">
-        <g clipPath="url(#clip1_4671_51136)">
-          <path
-            d="M13.4028 21.8652C12.8424 22.5629 11.7063 22.1806 11.6928 21.2898L11.4954 8.25948H20.3564C21.9614 8.25948 22.8565 10.0924 21.8585 11.3353L13.4028 21.8652Z"
-            fill="url(#paint0_linear_4671_51136)"
-          />
-          <path
-            d="M13.4028 21.8652C12.8424 22.5629 11.7063 22.1806 11.6928 21.2898L11.4954 8.25948H20.3564C21.9614 8.25948 22.8565 10.0924 21.8585 11.3353L13.4028 21.8652Z"
-            fill="url(#paint1_linear_4671_51136)"
-            fillOpacity="0.2"
-          />
-          <path
-            d="M9.79895 0.89838C10.3593 0.200591 11.4954 0.582929 11.5089 1.47383L11.5955 14.5041H2.84528C1.24026 14.5041 0.345103 12.6711 1.34316 11.4283L9.79895 0.89838Z"
-            fill="#3ECF8E"
-          />
-        </g>
-        <path
-          d="M30.5894 13.3913C30.7068 14.4766 31.7052 16.3371 34.6026 16.3371C37.1279 16.3371 38.3418 14.7479 38.3418 13.1976C38.3418 11.8022 37.3824 10.6588 35.4836 10.2712L34.1131 9.98049C33.5846 9.88359 33.2323 9.5929 33.2323 9.12777C33.2323 8.58512 33.7804 8.17818 34.4656 8.17818C35.5618 8.17818 35.9729 8.89521 36.0513 9.45725L38.2243 8.97275C38.1069 7.94561 37.1867 6.22083 34.446 6.22083C32.3709 6.22083 30.844 7.63555 30.844 9.34094C30.844 10.6781 31.6856 11.7828 33.5454 12.1898L34.8179 12.4805C35.5618 12.6355 35.8555 12.9844 35.8555 13.4107C35.8555 13.9146 35.4444 14.3603 34.583 14.3603C33.4476 14.3603 32.8797 13.6626 32.8212 12.9068L30.5894 13.3913Z"
-          fill="currentColor"
-        />
-        <path
-          d="M46.6623 16.0464H49.1486C49.1094 15.717 49.0506 15.0581 49.0506 14.3216V6.51154H46.4468V12.0542C46.4468 13.1588 45.7813 13.934 44.6263 13.934C43.4126 13.934 42.8643 13.0813 42.8643 12.0154V6.51154H40.2606V12.5387C40.2606 14.6123 41.5918 16.2984 43.9215 16.2984C44.9393 16.2984 46.0556 15.9108 46.5841 15.0193C46.5841 15.4069 46.6231 15.8526 46.6623 16.0464Z"
-          fill="currentColor"
-        />
-        <path
-          d="M54.433 19.7286V15.1162C54.9027 15.7558 55.8817 16.279 57.213 16.279C59.9341 16.279 61.7545 14.1472 61.7545 11.2596C61.7545 8.43021 60.1298 6.29842 57.3108 6.29842C55.8623 6.29842 54.7855 6.93792 54.3548 7.67439V6.51159H51.8295V19.7286H54.433ZM59.19 11.279C59.19 12.9845 58.133 13.9728 56.8017 13.9728C55.4708 13.9728 54.394 12.9651 54.394 11.279C54.394 9.59299 55.4708 8.6046 56.8017 8.6046C58.133 8.6046 59.19 9.59299 59.19 11.279Z"
-          fill="currentColor"
-        />
-        <path
-          d="M63.229 13.4495C63.229 14.9417 64.4818 16.3177 66.5375 16.3177C67.9662 16.3177 68.8865 15.6588 69.3758 14.9029C69.3758 15.2712 69.4149 15.7944 69.4737 16.0464H71.862C71.8033 15.7169 71.7449 15.0386 71.7449 14.5348V9.84482C71.7449 7.92622 70.6093 6.22083 67.5555 6.22083C64.9713 6.22083 63.5811 7.86807 63.4248 9.36033L65.7347 9.84482C65.8131 9.0115 66.4395 8.29445 67.5747 8.29445C68.6713 8.29445 69.1998 8.85646 69.1998 9.53475C69.1998 9.86421 69.0238 10.1355 68.4755 10.2131L66.1068 10.5619C64.5015 10.7945 63.229 11.744 63.229 13.4495ZM67.0854 14.3991C66.2438 14.3991 65.8325 13.8565 65.8325 13.2945C65.8325 12.558 66.361 12.1898 67.0268 12.0929L69.1998 11.7634V12.1898C69.1998 13.8759 68.1818 14.3991 67.0854 14.3991Z"
-          fill="currentColor"
-        />
-        <path
-          d="M76.895 16.0465V14.8837C77.4038 15.6976 78.4217 16.279 79.7531 16.279C82.4941 16.279 84.2951 14.1278 84.2951 11.2403C84.2951 8.4108 82.6701 6.25965 79.851 6.25965C78.4217 6.25965 77.3648 6.8798 76.934 7.55806V2.01546H74.3696V16.0465H76.895ZM81.6911 11.2596C81.6911 13.0038 80.6341 13.9728 79.3028 13.9728C77.9912 13.9728 76.895 12.9845 76.895 11.2596C76.895 9.51543 77.9912 8.56584 79.3028 8.56584C80.6341 8.56584 81.6911 9.51543 81.6911 11.2596Z"
-          fill="currentColor"
-        />
-        <path
-          d="M85.7692 13.4495C85.7692 14.9417 87.022 16.3177 89.0776 16.3177C90.5065 16.3177 91.4269 15.6588 91.916 14.9029C91.916 15.2712 91.9554 15.7944 92.014 16.0464H94.4023C94.3439 15.7169 94.2851 15.0386 94.2851 14.5348V9.84482C94.2851 7.92622 93.1495 6.22083 90.0955 6.22083C87.5115 6.22083 86.1216 7.86807 85.965 9.36033L88.2747 9.84482C88.3533 9.0115 88.9798 8.29445 90.1149 8.29445C91.2115 8.29445 91.74 8.85646 91.74 9.53475C91.74 9.86421 91.5638 10.1355 91.0156 10.2131L88.647 10.5619C87.0418 10.7945 85.7692 11.744 85.7692 13.4495ZM89.6258 14.3991C88.784 14.3991 88.3727 13.8565 88.3727 13.2945C88.3727 12.558 88.9012 12.1898 89.5671 12.0929L91.74 11.7634V12.1898C91.74 13.8759 90.722 14.3991 89.6258 14.3991Z"
-          fill="currentColor"
-        />
-        <path
-          d="M96.087 13.3913C96.2042 14.4766 97.2028 16.3371 100.1 16.3371C102.626 16.3371 103.839 14.7479 103.839 13.1976C103.839 11.8022 102.88 10.6588 100.981 10.2712L99.6105 9.98049C99.082 9.88359 98.7299 9.5929 98.7299 9.12777C98.7299 8.58512 99.2778 8.17818 99.963 8.17818C101.06 8.17818 101.471 8.89521 101.549 9.45725L103.722 8.97275C103.604 7.94561 102.684 6.22083 99.9436 6.22083C97.8683 6.22083 96.3416 7.63555 96.3416 9.34094C96.3416 10.6781 97.183 11.7828 99.043 12.1898L100.316 12.4805C101.06 12.6355 101.353 12.9844 101.353 13.4107C101.353 13.9146 100.942 14.3603 100.081 14.3603C98.9451 14.3603 98.3776 13.6626 98.3188 12.9068L96.087 13.3913Z"
-          fill="currentColor"
-        />
-        <path
-          d="M107.794 10.1937C107.852 9.32158 108.596 8.31381 109.947 8.31381C111.435 8.31381 112.062 9.24406 112.101 10.1937H107.794ZM112.355 12.6743C112.042 13.527 111.376 14.1278 110.163 14.1278C108.87 14.1278 107.794 13.2169 107.735 11.9573H114.626C114.626 11.9184 114.665 11.5309 114.665 11.1626C114.665 8.10064 112.884 6.22083 109.908 6.22083C107.441 6.22083 105.17 8.19753 105.17 11.2402C105.17 14.4572 107.5 16.3371 110.143 16.3371C112.512 16.3371 114.039 14.9611 114.528 13.3138L112.355 12.6743Z"
-          fill="currentColor"
-        />
-      </g>
-      <defs>
-        <linearGradient
-          id="paint0_linear_4671_51136"
-          x1="11.4954"
-          y1="11.1486"
-          x2="19.3439"
-          y2="14.4777"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#249361" />
-          <stop offset="1" stopColor="#3ECF8E" />
-        </linearGradient>
-        <linearGradient
-          id="paint1_linear_4671_51136"
-          x1="8.00382"
-          y1="6.42177"
-          x2="11.5325"
-          y2="13.1398"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop />
-          <stop offset="1" stopOpacity="0" />
-        </linearGradient>
-        <clipPath id="clip0_4671_51136">
-          <rect
-            width="113.85"
-            height="21.8943"
-            fill="currentColor"
-            transform="translate(0.922119 0.456161)"
-          />
-        </clipPath>
-        <clipPath id="clip1_4671_51136">
-          <rect
-            width="21.3592"
-            height="21.8943"
-            fill="currentColor"
-            transform="translate(0.919006 0.497101)"
-          />
-        </clipPath>
-      </defs>
-    </svg>
-  );
-}
-</file>
-
-<file path="components/theme-switcher.tsx">
-"use client";
-
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Laptop, Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
-const ThemeSwitcher = () => {
-  const [mounted, setMounted] = useState(false);
-  const { theme, setTheme } = useTheme();
+import type { Tables } from "@/lib/types";
+import Link from "next/link";
+import { ArrowRight, RefreshCw } from "lucide-react";
 
-  // useEffect only runs on the client, so now we can safely show the UI
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+type Lesson = Tables<"lessons">;
 
-  if (!mounted) {
-    return null;
-  }
-
-  const ICON_SIZE = 16;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size={"sm"}>
-          {theme === "light" ? (
-            <Sun
-              key="light"
-              size={ICON_SIZE}
-              className={"text-muted-foreground"}
-            />
-          ) : theme === "dark" ? (
-            <Moon
-              key="dark"
-              size={ICON_SIZE}
-              className={"text-muted-foreground"}
-            />
-          ) : (
-            <Laptop
-              key="system"
-              size={ICON_SIZE}
-              className={"text-muted-foreground"}
-            />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-content" align="start">
-        <DropdownMenuRadioGroup
-          value={theme}
-          onValueChange={(e) => setTheme(e)}
-        >
-          <DropdownMenuRadioItem className="flex gap-2" value="light">
-            <Sun size={ICON_SIZE} className="text-muted-foreground" />{" "}
-            <span>Light</span>
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem className="flex gap-2" value="dark">
-            <Moon size={ICON_SIZE} className="text-muted-foreground" />{" "}
-            <span>Dark</span>
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem className="flex gap-2" value="system">
-            <Laptop size={ICON_SIZE} className="text-muted-foreground" />{" "}
-            <span>System</span>
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+export default function LessonCard({
+  lesson,
+  lessonId,
+  lessonNumber,
+}: {
+  lesson: any;
+  lessonId?: number;
+  lessonNumber: number;
+}) {
+  const [lessonStatus, setLessonStatus] = useState<string | null>(
+    lesson.status || "pending",
   );
-};
+  const [isReady, setIsReady] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const supabase = createClient();
 
-export { ThemeSwitcher };
-</file>
+  useEffect(() => {
+    if (!lessonId) return;
 
-<file path="components/update-password-form.tsx">
-"use client";
+    // Fetch initial lesson status
+    const fetchLesson = async () => {
+      const { data, error } = await supabase
+        .from("lessons")
+        .select("status, compiled_js_url, error")
+        .eq("id", lessonId)
+        .single();
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+      if (data) {
+        setLessonStatus(data.status);
+        setIsReady(data.status === "completed" && !!data.compiled_js_url);
+        setErrorMessage(data.error);
+      }
+    };
 
-export function UpdatePasswordForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+    fetchLesson();
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
+    // Subscribe to realtime updates
+    const channel = supabase
+      .channel(`lesson-${lessonId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "lessons",
+          filter: `id=eq.${lessonId}`,
+        },
+        (payload) => {
+          const newLesson = payload.new as Lesson;
+          setLessonStatus(newLesson.status);
+          setIsReady(
+            newLesson.status === "completed" && !!newLesson.compiled_js_url,
+          );
+          setErrorMessage(newLesson.error);
+          if (newLesson.status !== "failed") {
+            setIsRetrying(false);
+          }
+        },
+      )
+      .subscribe();
 
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [lessonId, supabase]);
+
+  const handleRetry = async () => {
+    if (!lessonId || isRetrying) return;
+
+    setIsRetrying(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
-      setIsLoading(false);
+      const response = await fetch("/api/lesson/retry", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ lessonId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to retry lesson");
+      }
+
+      console.log("Retry triggered successfully:", data);
+    } catch (error) {
+      console.error("Error retrying lesson:", error);
+      setIsRetrying(false);
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to retry lesson generation",
+      );
     }
   };
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-          <CardDescription>
-            Please enter your new password below.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleForgotPassword}>
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-2">
-                <Label htmlFor="password">New password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="New password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Saving..." : "Save new password"}
-              </Button>
+    <div className="p-3 rounded border border-gray-200 dark:border-gray-700">
+      <div className="flex justify-between items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-gray-900 dark:text-white">
+            Lesson {lessonNumber}: {lesson.title}
+          </div>
+          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            {lesson.objective}
+          </div>
+
+          {/* Show error message if failed */}
+          {lessonStatus === "failed" && errorMessage && (
+            <div className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+              <strong>Error:</strong> {errorMessage}
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          )}
+        </div>
+
+        {/* Link to lesson when ready */}
+        {isReady && lessonId ? (
+          <Link
+            href={`/lesson/${lessonId}`}
+            className="flex-shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors flex flex-row items-center"
+          >
+            View Lesson {<ArrowRight className="scale-75" />}
+          </Link>
+        ) : (
+          <div className="flex items-center gap-2">
+            <LessonStatusBadge status={lessonStatus} />
+            {lessonStatus === "failed" && lessonId && (
+              <button
+                onClick={handleRetry}
+                disabled={isRetrying}
+                className="flex-shrink-0 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md transition-colors flex flex-row items-center gap-1"
+                title="Retry lesson generation"
+              >
+                <RefreshCw
+                  className={`w-3 h-3 ${isRetrying ? "animate-spin" : ""}`}
+                />
+                {isRetrying ? "Retrying..." : "Retry"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LessonStatusBadge({ status }: { status: string | null }) {
+  if (!status || status === "pending") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-full">
+        <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+        <span>Pending</span>
+      </div>
+    );
+  }
+
+  if (status === "generating" || status === "processing") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full">
+        <div className="animate-spin rounded-full h-2 w-2 border border-blue-600 border-t-transparent"></div>
+        <span>Generating...</span>
+      </div>
+    );
+  }
+
+  if (status === "completed") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded-full">
+        <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 20 20">
+          <path
+            fillRule="evenodd"
+            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span>Ready</span>
+      </div>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs rounded-full">
+        <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 20 20">
+          <path
+            fillRule="evenodd"
+            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+            clipRule="evenodd"
+          />
+        </svg>
+        <span>Failed</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-full">
+      <span>{status}</span>
     </div>
   );
 }
 </file>
 
-<file path="components/weather.tsx">
-type WeatherProps = {
-  temperature: number;
-  weather: string;
-  location: string;
+<file path="inngest/client.ts">
+import { Inngest } from "inngest";
+
+// Create a client to send and receive events
+export const inngest = new Inngest({ id: "my-app" });
+</file>
+
+<file path="lib/ai/index.ts">
+import { wrapAISDK } from "langsmith/experimental/vercel";
+import * as ai from "ai";
+
+const { generateObject, generateText } = wrapAISDK(ai);
+
+export { generateObject, generateText };
+</file>
+
+<file path="lib/ai/prompt.ts">
+export const __lesson_writer_base_prompt = ({
+  title,
+  objective,
+}: {
+  title: string;
+  objective: string;
+}) => {
+  return `Generate a complete, self-contained React component for the following lesson:
+  Title: ${title}
+  Objective: ${objective}
+
+  CRITICAL REQUIREMENTS:
+  1. Generate ONLY the component code, no imports, no exports, no markdown
+  2. The component must be named "LessonComponent"
+  3. Use Tailwind CSS for styling (it's already available)
+  4. Make it interactive and engaging where appropriate
+  5. Include proper TypeScript types
+  6. The code must be production-ready and error-free
+  7. For quizzes: include state management, answer checking, and score tracking
+  8. For explanations: use clear sections, examples, and visual hierarchy
+  9. For interactive content: add buttons, inputs, and dynamic behavior
+  10. Use modern React patterns (hooks, functional components)
+  11. MUST have ALL closing tags - validate JSX is complete
+
+  SIMPLE TEMPLATE TO FOLLOW:
+
+  function LessonComponent() {
+    const [activeSection, setActiveSection] = React.useState(0);
+
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <h1 className="text-3xl font-bold mb-6">${title}</h1>
+
+        <div className="bg-blue-50 p-6 rounded-lg mb-6">
+          <h2 className="text-xl font-semibold mb-3">Introduction</h2>
+          <p className="text-gray-700">
+            [Brief introduction about the topic]
+          </p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          <h2 className="text-xl font-semibold">Key Concepts</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-white p-4 rounded-lg border">
+              <h3 className="font-semibold mb-2">Concept 1</h3>
+              <p className="text-sm text-gray-600">[Explanation]</p>
+            </div>
+            <div className="bg-white p-4 rounded-lg border">
+              <h3 className="font-semibold mb-2">Concept 2</h3>
+              <p className="text-sm text-gray-600">[Explanation]</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-green-50 p-6 rounded-lg">
+          <h2 className="text-xl font-semibold mb-3">Summary</h2>
+          <p className="text-gray-700">[Brief summary]</p>
+        </div>
+      </div>
+    );
+  }
+
+  You can use UI components from "shadcn".
+  Available components:
+  - Box({children, className})
+  - Text({children, className})
+  - Callout({title, children})
+  - AnimatedCard({children, className})
+  - Graph({data, xKey, yKey, height})
+  - SVGCanvas({width, height, shapes})
+  - Calculator({formula, inputs})
+  - Quiz({questions})
+  - Timeline({steps})
+  - CodeBlock({code, language})
+  - Math({tex})
+
+  DO NOT WRITE ANY IMPORT STATEMENTS, ASSUME THE COMPONENTS TO BE IMPORTED GLOBALLY, JUST USE THEM NORMALLY
+
+  ## SVG GENERATION RULES
+
+  You have access to a tool:
+
+      generate_svg({ prompt })
+
+  Use this tool to generate **educational SVG diagrams** whenever a diagram would help understanding.
+
+  Examples of when to call 'generate_svg':
+  - force arrows, vectors, motion diagrams
+  - geometry shapes
+  - number lines
+  - coordinate grid visualizations
+  - free body diagrams
+  - projectile motion arcs
+  - physics conceptual explanations
+  - math relationships or annotated shapes
+  - algorithm diagrams or flowcharts
+
+  Do NOT call generate_svg unless the diagram is directly useful.
+
+  ### After the tool returns the SVG:
+
+  You MUST continue generating and embed the returned SVG in your component like this:
+
+      <div dangerouslySetInnerHTML={{ __html: \`\${svg_from_tool}\` }} />
+
+  or wrap it in a component if needed.
+
+  IMPORTANT: After calling any tools, you MUST output the complete LessonComponent function with the tool results incorporated.
+
+  Now generate the component for: ${objective}
+
+  Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`;
 };
 
-export const Weather = ({ temperature, weather, location }: WeatherProps) => {
-  return (
-    <div>
-      <h2>Current Weather for {location}</h2>
-      <p>Condition: {weather}</p>
-      <p>Temperature: {temperature}°C</p>
-    </div>
-  );
+export const __lesson_writer_error_prompt = ({
+  lastErr,
+  generated_code,
+}: {
+  lastErr: string;
+  generated_code: string;
+}) => {
+  return `The following React TSX component failed to compile or render:
+
+  Error: ${lastErr}
+
+  Broken Code:
+  ${generated_code}
+
+  Fix it and output a **working corrected version** of the same component.
+  Rules:
+  - Keep the same function name (LessonComponent)
+  - Return only the function code
+  - It must compile and render without error.`;
 };
 </file>
 
@@ -2629,43 +1249,6 @@ export async function updateSession(request: NextRequest) {
   // of sync and terminate the user's session prematurely!
 
   return supabaseResponse;
-}
-</file>
-
-<file path="lib/supabase/server.ts">
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-
-/**
- * Especially important if using Fluid compute: Don't put this client in a
- * global variable. Always create a new client within each function when using
- * it.
- */
-export async function createClient() {
-  const cookieStore = await cookies();
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options),
-            );
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
-          }
-        },
-      },
-    },
-  );
 }
 </file>
 
@@ -2769,86 +1352,6 @@ const eslintConfig = [
 ];
 
 export default eslintConfig;
-</file>
-
-<file path="middleware.ts">
-import { updateSession } from "@/lib/supabase/middleware";
-import { type NextRequest } from "next/server";
-
-export async function middleware(request: NextRequest) {
-  return await updateSession(request);
-}
-
-export const config = {
-  matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
-     * Feel free to modify this pattern to include more paths.
-     */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
-};
-</file>
-
-<file path="next.config.ts">
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
-</file>
-
-<file path="package.json">
-{
-  "private": true,
-  "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint ."
-  },
-  "dependencies": {
-    "@ai-sdk/google": "^2.0.31",
-    "@ai-sdk/openai": "^2.0.65",
-    "@ai-sdk/react": "^2.0.92",
-    "@radix-ui/react-checkbox": "^1.3.1",
-    "@radix-ui/react-dropdown-menu": "^2.1.14",
-    "@radix-ui/react-label": "^2.1.6",
-    "@radix-ui/react-slot": "^1.2.2",
-    "@supabase/ssr": "latest",
-    "@supabase/supabase-js": "latest",
-    "ai": "^5.0.92",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "langsmith": "^0.3.79",
-    "lucide-react": "^0.511.0",
-    "next": "latest",
-    "next-themes": "^0.4.6",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.3.0",
-    "zod": "^4.1.12"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.1",
-    "postcss": "^8",
-    "tailwindcss": "^3.4.1",
-    "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5"
-  }
-}
 </file>
 
 <file path="postcss.config.mjs">
@@ -3084,6 +1587,1827 @@ export default {
     "node_modules"
   ]
 }
+</file>
+
+<file path="app/api/lesson/retry/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { type Database } from "@/lib/types";
+import { inngest } from "@/inngest/client";
+
+// Create a Supabase client with service role for server-side operations
+function createServiceClient() {
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { lessonId } = await request.json();
+
+    if (!lessonId) {
+      return NextResponse.json(
+        { error: "Lesson ID is required" },
+        { status: 400 },
+      );
+    }
+
+    const supabase = createServiceClient();
+
+    // Fetch the lesson details including the previous error
+    const { data: lesson, error: fetchError } = await supabase
+      .from("lessons")
+      .select("*")
+      .eq("id", lessonId)
+      .single();
+
+    if (fetchError || !lesson) {
+      return NextResponse.json({ error: "Lesson not found" }, { status: 404 });
+    }
+
+    // Reset the lesson status to pending
+    const { error: updateError } = await supabase
+      .from("lessons")
+      .update({
+        status: "pending",
+        error: null,
+      })
+      .eq("id", lessonId);
+
+    if (updateError) {
+      throw new Error(`Failed to update lesson: ${updateError.message}`);
+    }
+
+    // Trigger the Inngest event with the previous error context
+    await inngest.send({
+      name: "lesson.generate",
+      data: {
+        lesson_id: lesson.id,
+        title: lesson.title,
+        objective: lesson.objective,
+        course_id: lesson.course_id,
+        previous_error: lesson.error, // Include the previous error
+        is_retry: true,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Lesson generation retry triggered",
+      lessonId,
+    });
+  } catch (error) {
+    console.error("Error retrying lesson:", error);
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to retry lesson",
+      },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="app/lesson/[id]/page.tsx">
+"use client";
+
+import { use, useEffect, useState } from "react";
+import React from "react";
+import * as RegistryComponents from "@/components/registry";
+
+const {
+  Box,
+  Text,
+  Callout,
+  Calculator,
+  AnimatedCard,
+  SVGCanvas,
+  Math,
+  Timeline,
+  Quiz,
+  CodeBlock,
+} = RegistryComponents;
+
+export default function LessonPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const [Comp, setComp] = useState<React.FunctionComponent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const { id } = use(params);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        // Fetch the compiled code from our API route
+        const response = await fetch(`/api/lesson/${id}`);
+
+        if (!response.ok) {
+          const contentType = response.headers.get("content-type");
+          if (contentType?.includes("application/json")) {
+            const errorData = await response.json();
+            throw new Error(
+              errorData.error || `Failed to fetch: ${response.status}`,
+            );
+          }
+          throw new Error(
+            `Failed to fetch: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const code = await response.text();
+
+        // Remove the imports since we'll provide React directly
+        const codeWithoutImports = code
+          .replace(/import\s+React\s+from\s+['"][^'"]+['"];?\s*/g, "")
+          .replace(/import\s+{\s*([^}]+)\s*}\s+from\s+['"]react['"];?\s*/g, "")
+          .replace(
+            /import\s+{\s*([^}]+)\s*}\s+from\s+['"]https:\/\/esm\.sh\/react@\d+['"];?\s*/g,
+            "",
+          );
+
+        // Wrap the code to inject React and registry components
+        const wrappedCode = `
+const React = window.__REACT__;
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
+const { Box, Text, Callout, Calculator, AnimatedCard, SVGCanvas, Math, Timeline, Quiz, CodeBlock, Graph } = window.__REGISTRY__;
+
+${codeWithoutImports}
+
+export default LessonComponent
+
+`;
+
+        // Expose React and registry components globally for the dynamic module
+        (window as any).__REACT__ = React;
+        (window as any).__REGISTRY__ = RegistryComponents;
+
+        // Create a blob URL from the code
+        const blob = new Blob([wrappedCode], {
+          type: "application/javascript",
+        });
+        const url = URL.createObjectURL(blob);
+
+        // Import from the blob URL
+        const mod = await import(/* webpackIgnore: true */ url);
+
+        // Clean up
+        URL.revokeObjectURL(url);
+
+        // Get the component
+        const Component = mod.LessonComponent || mod.default;
+        if (!Component) {
+          throw new Error(
+            "No component found in module exports: " +
+              Object.keys(mod).join(", "),
+          );
+        }
+
+        setComp(() => Component);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load lesson component",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, [id]);
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          <strong className="font-bold">Error: </strong>
+          <span className="block sm:inline">{error}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto text-center">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-gray-200 rounded w-3/4 mx-auto"></div>
+          <div className="h-4 bg-gray-200 rounded"></div>
+          <div className="h-4 bg-gray-200 rounded w-5/6 mx-auto"></div>
+        </div>
+        <p className="mt-4 text-gray-600">Loading lesson...</p>
+      </div>
+    );
+  }
+
+  if (!Comp) {
+    return (
+      <div className="p-6 text-center text-gray-500">
+        No component available
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Comp />
+    </div>
+  );
+}
+</file>
+
+<file path="app/globals.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 0 0% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 3.9%;
+        --primary: 0 0% 9%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 0 0% 96.1%;
+        --secondary-foreground: 0 0% 9%;
+        --muted: 0 0% 96.1%;
+        --muted-foreground: 0 0% 45.1%;
+        --accent: 0 0% 96.1%;
+        --accent-foreground: 0 0% 9%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 89.8%;
+        --input: 0 0% 89.8%;
+        --ring: 0 0% 3.9%;
+        --chart-1: 12 76% 61%;
+        --chart-2: 173 58% 39%;
+        --chart-3: 197 37% 24%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 27 87% 67%;
+        --radius: 0.5rem;
+        --border: 0 0% 18%;
+    }
+    .dark {
+        --background: 0 0% 3.9%;
+        --foreground: 0 0% 98%;
+        --card: 0 0% 3.9%;
+        --card-foreground: 0 0% 98%;
+        --popover: 0 0% 3.9%;
+        --popover-foreground: 0 0% 98%;
+        --primary: 0 0% 98%;
+        --primary-foreground: 0 0% 9%;
+        --secondary: 0 0% 14.9%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 14.9%;
+        --muted-foreground: 0 0% 63.9%;
+        --accent: 0 0% 14.9%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 14.9%;
+        --input: 0 0% 14.9%;
+        --ring: 0 0% 83.1%;
+        --chart-1: 220 70% 50%;
+        --chart-2: 160 60% 45%;
+        --chart-3: 30 80% 55%;
+        --chart-4: 280 65% 60%;
+        --chart-5: 340 75% 55%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+</file>
+
+<file path="components/ui/CalculatorUI.tsx">
+import { useState } from "react";
+
+type CalcInput = {
+  name: string;
+  label: string;
+  type?: string; // "number" etc
+};
+
+export const CalculatorUI = ({
+  formula,
+  inputs,
+  onResult,
+}: {
+  formula: string;
+  inputs: CalcInput[];
+  onResult?: (result: number) => void;
+}) => {
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const compute = () => {
+    // still using Function() — your call, but typing is fine
+    const fn = new Function(...inputs.map((i) => i.name), `return ${formula};`);
+
+    const args = inputs.map((i) => parseFloat(values[i.name] || "0"));
+    const result = fn(...args);
+    onResult?.(result);
+  };
+
+  return (
+    <div className="p-4 border rounded space-y-4 bg-gray-50">
+      <h2 className="font-medium">{formula}</h2>
+
+      {inputs.map((input) => (
+        <div key={input.name}>
+          <label className="block text-sm font-medium">{input.label}</label>
+          <input
+            type="number"
+            className="border p-2 rounded w-full"
+            onChange={(e) =>
+              setValues((prev) => ({
+                ...prev,
+                [input.name]: e.target.value,
+              }))
+            }
+          />
+        </div>
+      ))}
+
+      <button
+        onClick={compute}
+        className="px-4 py-2 bg-green-600 text-white rounded"
+      >
+        Compute
+      </button>
+    </div>
+  );
+};
+</file>
+
+<file path="components/ui/QuizComponent.tsx">
+// components/blocks/QuizComponent.tsx
+import { useState } from "react";
+
+type QuizQuestion = {
+  id: number;
+  question: string;
+  options: string[];
+  correct: string;
+};
+
+type QuizComponentProps = {
+  questions: QuizQuestion[];
+  onComplete?: (score: number) => void;
+};
+
+export const QuizComponent = ({
+  questions,
+  onComplete,
+}: QuizComponentProps) => {
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    const score = questions.reduce(
+      (acc, q) => (answers[q.id] === q.correct ? acc + 1 : acc),
+      0,
+    );
+    setSubmitted(true);
+    onComplete?.(score);
+  };
+
+  if (submitted)
+    return (
+      <div className="p-4 rounded bg-green-50 border border-green-300">
+        <h2 className="font-bold mb-2">Quiz Complete!</h2>
+        <p>
+          Your score:{" "}
+          {
+            Object.values(answers).filter((a, i) => a === questions[i].correct)
+              .length
+          }
+        </p>
+      </div>
+    );
+
+  return (
+    <div className="space-y-6">
+      {questions.map((q) => (
+        <div key={q.id} className="p-4 border rounded">
+          <h3 className="font-semibold mb-2">
+            {q.id}. {q.question}
+          </h3>
+          {q.options.map((option) => (
+            <label key={option} className="block">
+              <input
+                type="radio"
+                name={`q-${q.id}`}
+                value={option}
+                onChange={() =>
+                  setAnswers((prev) => ({ ...prev, [q.id]: option }))
+                }
+              />
+              <span className="ml-2">{option}</span>
+            </label>
+          ))}
+        </div>
+      ))}
+
+      <button
+        onClick={handleSubmit}
+        className="px-4 py-2 bg-blue-600 text-white rounded"
+      >
+        Submit
+      </button>
+    </div>
+  );
+};
+</file>
+
+<file path="components/registry.tsx">
+import { ReactNode } from "react";
+import { motion } from "framer-motion";
+import katex from "katex";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { QuizComponent } from "./ui/QuizComponent";
+import { CalculatorUI } from "./ui/CalculatorUI";
+
+// Box
+export const Box = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => <div className={`p-4 rounded-lg ${className}`}>{children}</div>;
+
+// Text
+export const Text = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => <p className={className}>{children}</p>;
+
+// Callout
+export const Callout = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) => (
+  <div className="p-4 rounded-md bg-indigo-50 border-l-4 border-indigo-500">
+    <strong className="block mb-1">{title}</strong>
+    <div>{children}</div>
+  </div>
+);
+
+// AnimatedCard
+export const AnimatedCard = ({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) => (
+  <motion.div
+    initial={{ y: 8, opacity: 0 }}
+    animate={{ y: 0, opacity: 1 }}
+    className={`p-4 rounded-lg shadow ${className}`}
+  >
+    {children}
+  </motion.div>
+);
+
+// Graph
+export const Graph = ({
+  data,
+  xKey = "x",
+  yKey = "y",
+  height = 220,
+}: {
+  data: any[];
+  xKey?: string;
+  yKey?: string;
+  height?: number;
+}) => (
+  <ResponsiveContainer width="100%" height={height}>
+    <LineChart data={data}>
+      <Line dataKey={yKey} />
+      <CartesianGrid />
+      <XAxis dataKey={xKey} />
+      <YAxis />
+    </LineChart>
+  </ResponsiveContainer>
+);
+
+// SVGCanvas
+export const SVGCanvas = ({
+  width = 600,
+  height = 300,
+  shapes = [],
+}: {
+  width?: number;
+  height?: number;
+  shapes: {
+    type: "circle" | "line" | "path";
+    [key: string]: any;
+  }[];
+}) => (
+  <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+    {shapes.map((s, i) => {
+      if (s.type === "circle")
+        return <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill={s.fill} />;
+      if (s.type === "line")
+        return (
+          <line
+            key={i}
+            x1={s.x1}
+            y1={s.y1}
+            x2={s.x2}
+            y2={s.y2}
+            stroke={s.stroke}
+          />
+        );
+      if (s.type === "path")
+        return (
+          <path key={i} d={s.d} fill={s.fill || "none"} stroke={s.stroke} />
+        );
+      return null;
+    })}
+  </svg>
+);
+
+// Calculator
+export const Calculator = ({
+  formula,
+  inputs,
+  onResult,
+}: {
+  formula: string;
+  inputs: { name: string; label: string; type?: string }[];
+  onResult: (result: number) => void;
+}) => <CalculatorUI formula={formula} inputs={inputs} onResult={onResult} />;
+
+// Quiz
+type QuizQuestion = {
+  id: number;
+  question: string;
+  options: string[];
+  correct: string;
+};
+
+export const Quiz = ({
+  questions,
+  onComplete,
+}: {
+  questions: QuizQuestion[];
+  onComplete: (score: number) => void;
+}) => <QuizComponent questions={questions} onComplete={onComplete} />;
+
+// Timeline
+export const Timeline = ({
+  steps,
+}: {
+  steps: { title: string; desc: string }[];
+}) => (
+  <ol>
+    {steps.map((s, i) => (
+      <li key={i}>
+        <strong>{s.title}</strong>
+        <div>{s.desc}</div>
+      </li>
+    ))}
+  </ol>
+);
+
+// CodeBlock
+export const CodeBlock = ({
+  code,
+  language = "tsx",
+}: {
+  code: string;
+  language?: string;
+}) => (
+  <pre className="rounded bg-slate-900 text-white p-3">
+    <code>{code}</code>
+  </pre>
+);
+
+// Math
+export const Math = ({ tex }: { tex: string }) => (
+  <div dangerouslySetInnerHTML={{ __html: katex.renderToString(tex) }} />
+);
+</file>
+
+<file path="lib/supabase/server.ts">
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createClient() {
+  const cookieStore = await cookies();
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options),
+            );
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+      },
+    },
+  );
+}
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  experimental: {
+    serverComponentsExternalPackages: ["esbuild", "vm2"],
+  },
+  serverExternalPackages: ["esbuild", "vm2"],
+};
+
+export default nextConfig;
+</file>
+
+<file path="lib/types.ts">
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "13.0.5"
+  }
+  public: {
+    Tables: {
+      courses: {
+        Row: {
+          created_at: string
+          id: number
+          outline: Json | null
+          status: string | null
+          topic: string | null
+          trace_id: string | null
+          trace_url: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          outline?: Json | null
+          status?: string | null
+          topic?: string | null
+          trace_id?: string | null
+          trace_url?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          outline?: Json | null
+          status?: string | null
+          topic?: string | null
+          trace_id?: string | null
+          trace_url?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      lessons: {
+        Row: {
+          compiled_js_url: string | null
+          course_id: number | null
+          created_at: string
+          error: string | null
+          id: number
+          objective: string | null
+          order: number | null
+          status: string | null
+          title: string | null
+          trace_id: string | null
+          trace_url: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          compiled_js_url?: string | null
+          course_id?: number | null
+          created_at?: string
+          error?: string | null
+          id?: number
+          objective?: string | null
+          order?: number | null
+          status?: string | null
+          title?: string | null
+          trace_id?: string | null
+          trace_url?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          compiled_js_url?: string | null
+          course_id?: number | null
+          created_at?: string
+          error?: string | null
+          id?: number
+          objective?: string | null
+          order?: number | null
+          status?: string | null
+          title?: string | null
+          trace_id?: string | null
+          trace_url?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lessons_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
+}
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {},
+  },
+} as const
+</file>
+
+<file path="app/api/chat/route.ts">
+import { generateCoursePlan } from "@/lib/ai/tools";
+import { google } from "@ai-sdk/google";
+import * as ai from "ai";
+import { stepCountIs } from "ai";
+import { wrapAISDK } from "langsmith/experimental/vercel";
+
+const { streamText } = wrapAISDK(ai);
+
+export async function POST(req: Request) {
+  const { messages, userId }: { messages: ai.UIMessage[]; userId: string } =
+    await req.json();
+  console.log("userId: ", userId);
+
+  const result = streamText({
+    model: google("gemini-flash-latest"),
+    system: `You are a helpful educational assistant that helps users create structured courses.
+
+When a user asks to create a course or lessons, you MUST:
+0. Just generate some pretext, like whatever, a bit about topic 2-3 liners are enough.
+1. Call the generateCoursePlan
+2. Wait for the tool result
+3. Explain to the user what was created based on the tool output
+4. Include the course_id from the tool result in your response
+
+Always acknowledge the course creation and provide details about the generated lessons.`,
+    messages: ai.convertToModelMessages(messages),
+    tools: {
+      generateCoursePlan,
+    },
+    stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
+    experimental_transform: ai.smoothStream(),
+  });
+
+  return result.toUIMessageStreamResponse();
+}
+</file>
+
+<file path="inngest/functions.ts">
+import { inngest } from "./client";
+import { vercel } from "@ai-sdk/vercel";
+import { generateText } from "@/lib/ai";
+import { transformSync } from "esbuild";
+import { createClient } from "@supabase/supabase-js";
+import { Database } from "@/lib/types";
+import { generate_svg_tool } from "@/lib/ai/tools";
+import { stepCountIs } from "ai";
+import { VM } from "vm2";
+import {
+  __lesson_writer_base_prompt,
+  __lesson_writer_error_prompt,
+} from "@/lib/ai/prompt";
+
+const MAX_RETRIES = 3;
+
+/**
+ * Validates the compiled code by executing it in a safe VM environment
+ * Returns { valid: true } if successful, or { valid: false, error: string } if there's a runtime error
+ */
+function validateCompiledCode(compiledCode: string): {
+  valid: boolean;
+  error?: string;
+} {
+  try {
+    // Create a safe VM with a timeout
+    const vm = new VM({
+      timeout: 5000, // 5 second timeout
+      sandbox: {
+        // Mock React and common dependencies
+        React: {
+          useState: () => [null, () => {}],
+          useEffect: () => {},
+          useCallback: () => {},
+          useMemo: () => null,
+          useRef: () => ({ current: null }),
+          createElement: () => ({}),
+          Fragment: {},
+        },
+        console: {
+          log: () => {},
+          error: () => {},
+          warn: () => {},
+        },
+        // Mock window object for any window references
+        window: {},
+        document: {},
+        // Mock registry components
+        Box: () => ({}),
+        Text: () => ({}),
+        Callout: () => ({}),
+        Calculator: () => ({}),
+        AnimatedCard: () => ({}),
+        SVGCanvas: () => ({}),
+        Math: () => ({}),
+        Timeline: () => ({}),
+        Quiz: () => ({}),
+        CodeBlock: () => ({}),
+        Graph: () => ({}),
+      },
+    });
+
+    // Wrap the compiled code to catch any execution errors
+    const wrappedCode = `
+      ${compiledCode}
+
+      // Check if LessonComponent is defined and is a function
+      if (typeof LessonComponent === 'undefined') {
+        throw new Error('LessonComponent is not defined');
+      }
+
+      if (typeof LessonComponent !== 'function') {
+        throw new Error('LessonComponent is not a function');
+      }
+
+      // Try to instantiate the component to catch immediate errors
+      try {
+        LessonComponent({});
+      } catch (e) {
+        // If it's a hook error, that's okay - it means the component is structured correctly
+        if (e.message && e.message.includes('hook')) {
+          // This is expected - hooks can't be called outside of React
+          return true;
+        }
+        throw e;
+      }
+
+      return true;
+    `;
+
+    const result = vm.run(wrappedCode);
+
+    return { valid: true };
+  } catch (err: any) {
+    console.error("Runtime validation error:", err.message);
+    return {
+      valid: false,
+      error: `Runtime error: ${err.message}`,
+    };
+  }
+}
+
+// Create a Supabase client with service role for server-side operations
+function createServiceClient() {
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+}
+
+export const generateLesson = inngest.createFunction(
+  { id: "generate_lesson" },
+  { event: "lesson.generate" },
+
+  async ({ event, step }) => {
+    const { lesson_id, title, objective, course_id, previous_error, is_retry } =
+      event.data;
+    console.log(`[Inngest] Starting lesson generation for lesson ${lesson_id}`);
+    const supabase = createServiceClient();
+
+    let attempt = 0;
+    let lastErr = "";
+    let generated_code = "";
+
+    const { error: statusError } = await supabase
+      .from("lessons")
+      .update({ status: "processing" })
+      .eq("id", lesson_id);
+
+    if (statusError) {
+      console.error("Failed to update status to processing:", statusError);
+    }
+
+    while (attempt < MAX_RETRIES) {
+      attempt++;
+      console.log(
+        `[Inngest] Attempt ${attempt}/${MAX_RETRIES} for lesson ${lesson_id}`,
+      );
+
+      // Build the prompt based on whether this is a retry or first attempt
+      let prompt = "";
+
+      if (attempt === 1 && is_retry && previous_error) {
+        // This is a manual retry with a previous error
+        prompt =
+          `You are an expert React/TypeScript developer and educational content creator.
+
+This is a RETRY attempt. The previous generation failed with the following error:
+${previous_error}
+
+Please generate a corrected version that addresses this error.` +
+          __lesson_writer_base_prompt({ title, objective });
+      } else if (attempt === 1) {
+        // First attempt (not a retry)
+        prompt =
+          "You are an expert React/TypeScript developer and educational content creator." +
+          __lesson_writer_base_prompt({ title, objective });
+      } else {
+        // Subsequent retry attempts within the same run
+        prompt = __lesson_writer_error_prompt({ lastErr, generated_code });
+      }
+
+      const result = await generateText({
+        model: vercel("v0-1.5-md"),
+        prompt: prompt,
+        temperature: 0.6,
+        maxOutputTokens: 10000,
+        stopWhen: stepCountIs(5), // Allow up to 5 steps for tool calls and continuation
+        tools: { generate_svg: generate_svg_tool },
+      });
+
+      console.log("Generation steps:", result.steps?.length || 0);
+      console.log("Tool calls made:", result.toolCalls?.length || 0);
+
+      // Log tool results for debugging
+      if (result.toolResults && result.toolResults.length > 0) {
+        console.log(
+          "Tool results:",
+          JSON.stringify(result.toolResults, null, 2),
+        );
+      }
+
+      // Extract the final text after all tool calls
+      generated_code = result.text
+        .replace(/```typescript\n?/g, "")
+        .replace(/```tsx\n?/g, "")
+        .replace(/```javascript\n?/g, "")
+        .replace(/```jsx\n?/g, "")
+        .replace(/```\n?/g, "")
+        .trim();
+
+      // If no component code generated, log the issue
+      if (!generated_code.includes("function LessonComponent")) {
+        console.error("No LessonComponent found in generated code!");
+        console.error("Full response:", result.text);
+        lastErr = "Model did not generate a LessonComponent function";
+        continue;
+      }
+
+      // ===== NEW: Add basic syntax validation =====
+      const openBraces = (generated_code.match(/{/g) || []).length;
+      const closeBraces = (generated_code.match(/}/g) || []).length;
+      const openParens = (generated_code.match(/\(/g) || []).length;
+      const closeParens = (generated_code.match(/\)/g) || []).length;
+
+      if (openBraces !== closeBraces) {
+        lastErr = `Syntax error: Mismatched braces (${openBraces} open, ${closeBraces} close)`;
+        console.warn(lastErr);
+        continue;
+      }
+
+      if (openParens !== closeParens) {
+        lastErr = `Syntax error: Mismatched parentheses (${openParens} open, ${closeParens} close)`;
+        console.warn(lastErr);
+        continue;
+      }
+
+      let compiled: string;
+
+      try {
+        console.log("compiling code \n\n");
+
+        const result = transformSync(generated_code, {
+          loader: "tsx",
+          format: "esm",
+        });
+
+        console.log("compiled code : ", result.code, "\n\n");
+
+        compiled = result.code;
+
+        // ====== RUNTIME VALIDATION ======
+        // const validation = validateCompiledCode(compiled);
+
+        // if (!validation.valid) {
+        //   lastErr = validation.error || "Runtime validation failed";
+        //   console.warn("runtime validation failed", lastErr);
+        //   continue;
+        // }
+
+        // console.log("runtime validation passed");
+
+        const fileName = `${lesson_id}.js`;
+        const { error: uploadError } = await supabase.storage
+          .from("lessons")
+          .upload(fileName, compiled, {
+            contentType: "application/javascript",
+            upsert: true,
+          });
+
+        if (uploadError) {
+          throw new Error(`Upload error : ${uploadError.message}`);
+        }
+
+        // Fix: Get public URL from the same path where file was uploaded
+        const { data: urlData } = supabase.storage
+          .from("lessons")
+          .getPublicUrl(fileName);
+
+        console.log("Public URL data:", urlData);
+
+        const { error: updateError } = await supabase
+          .from("lessons")
+          .update({
+            compiled_js_url: urlData.publicUrl,
+            status: "completed",
+            error: null, // Clear any previous errors
+          })
+          .eq("id", lesson_id);
+
+        if (updateError) {
+          console.error(
+            "Failed to update lesson with URL and status:",
+            updateError,
+          );
+          throw new Error(`Database update error: ${updateError.message}`);
+        }
+
+        console.log(`[Inngest] Successfully completed lesson ${lesson_id}`);
+        return { success: true, lesson_id };
+      } catch (err: any) {
+        lastErr = `Compile error: ${err.message}`;
+        console.warn(lastErr);
+        continue;
+      }
+    }
+
+    const { error: failError } = await supabase
+      .from("lessons")
+      .update({ status: "failed", error: lastErr })
+      .eq("id", lesson_id);
+
+    if (failError) {
+      console.error("Failed to update lesson status to failed:", failError);
+    }
+
+    console.error(
+      `[Inngest] Lesson ${lesson_id} generation failed after all retries:`,
+      lastErr,
+    );
+    return { success: false, lesson_id, error: lastErr };
+  },
+);
+</file>
+
+<file path="package.json">
+{
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^2.0.31",
+    "@ai-sdk/openai": "^2.0.65",
+    "@ai-sdk/react": "^2.0.92",
+    "@ai-sdk/vercel": "^1.0.28",
+    "@radix-ui/react-checkbox": "^1.3.1",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-dropdown-menu": "^2.1.14",
+    "@radix-ui/react-label": "^2.1.6",
+    "@radix-ui/react-slot": "^1.2.2",
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "ai": "^5.0.92",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "desmos-react": "^1.2.0",
+    "dotenv": "^17.2.3",
+    "esbuild": "^0.27.0",
+    "framer-motion": "^12.23.24",
+    "inngest": "^3.45.1",
+    "katex": "^0.16.25",
+    "langsmith": "^0.3.79",
+    "lucide-react": "^0.511.0",
+    "next": "latest",
+    "next-themes": "^0.4.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.4.1",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.3.0",
+    "uuid": "^13.0.0",
+    "vm2": "^3.10.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.1",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="app/page.tsx">
+"use client";
+
+import { useChat } from "@ai-sdk/react";
+import { useState, useEffect, useRef } from "react";
+import { DefaultChatTransport } from "ai";
+import { useUser } from "./hooks/useUser";
+import {
+  loadMessagesFromStorage,
+  clearChatHistory,
+} from "./hooks/useChatPersistence";
+import LessonCard from "@/components/ui/LessonDisp";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Input } from "@/components/ui/input";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
+import { ChevronsUpDown } from "lucide-react";
+const CHAT_STORAGE_KEY = "ai-course-chat-messages";
+const CHAT_VERSION = "1";
+
+export default function Page() {
+  const [input, setInput] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  const [isOpen, setIsOpen] = useState(false);
+  const userId = useUser();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load messages synchronously on client
+  const getInitialMessages = () => {
+    if (typeof window === "undefined") return [];
+    return loadMessagesFromStorage();
+  };
+
+  const { messages, sendMessage, setMessages } = useChat({
+    transport: new DefaultChatTransport({
+      body: { userId },
+    }),
+    messages: getInitialMessages(),
+  });
+
+  // Mark as mounted and restore messages
+  useEffect(() => {
+    const savedMessages = loadMessagesFromStorage();
+    if (savedMessages.length > 0) {
+      console.log("Restoring messages:", savedMessages);
+      setMessages(savedMessages);
+    }
+    setMounted(true);
+  }, [setMessages]);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (!mounted || messages.length === 0) return;
+
+    try {
+      const stored = {
+        version: CHAT_VERSION,
+        messages,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(stored));
+      console.log("Saved", messages.length, "messages to localStorage");
+    } catch (error) {
+      console.error("Failed to save chat messages:", error);
+    }
+  }, [messages, mounted]);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (messages.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    sendMessage({ text: input });
+    setInput("");
+  };
+
+  const handleClearChat = () => {
+    if (confirm("Are you sure you want to clear the chat history?")) {
+      clearChatHistory();
+      setMessages([]);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0a0a0a]">
+      <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 pb-4">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            AI Course Generator
+          </h1>
+
+          {messages.length > 0 && (
+            <button
+              onClick={handleClearChat}
+              className="px-4 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              Clear Chat
+            </button>
+          )}
+        </div>
+
+        {/* Messages - Scrollable area */}
+        <div className="flex-1 overflow-y-auto px-6 pb-4">
+          <div className="space-y-4">
+            {messages.length === 0 && (
+              <div className="text-center py-12">
+                <div className="text-gray-400 dark:text-gray-600 mb-4">
+                  <svg
+                    className="w-16 h-16 mx-auto mb-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  No messages yet
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Start by describing the course you'd like to create
+                </p>
+              </div>
+            )}
+
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  key={message.id}
+                  className={`p-2 rounded-2xl ${
+                    message.role === "user" ? "bg-[#1f1f1f]" : ""
+                  }`}
+                >
+                  <div className="text-gray-800 dark:text-gray-200 leading-relaxed tracking-wide">
+                    {message.parts?.map((part, index) => {
+                      // Text content
+                      if (part.type === "text") {
+                        return (
+                          <ReactMarkdown
+                            key={index}
+                            remarkPlugins={[remarkGfm]}
+                          >
+                            {part.text}
+                          </ReactMarkdown>
+                        );
+                      }
+
+                      // Course generation tool
+                      if (part.type === "tool-generateCoursePlan") {
+                        switch (part.state) {
+                          case "input-available":
+                            return (
+                              <div
+                                key={index}
+                                className="flex items-center gap-2 text-blue-600 dark:text-blue-400"
+                              >
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                Generating course plan...
+                              </div>
+                            );
+                          case "output-available":
+                            return (
+                              <CoursePlanDisplay
+                                key={index}
+                                output={part.output}
+                              />
+                            );
+                          case "output-error":
+                            return (
+                              <div
+                                key={index}
+                                className="text-red-600 dark:text-red-400"
+                              >
+                                Error: {part.errorText}
+                              </div>
+                            );
+                          default:
+                            return null;
+                        }
+                      }
+
+                      return null;
+                    })}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Fixed Input Form at bottom */}
+        <div className="border-gray-200 dark:border-gray-700 bg-transparent p-6">
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-row gap-2 bg-[#121212] items-center rounded-md p-2 border border-border h-15 min-h-15"
+          >
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder='Try: "Create a course on Python with 5 lessons"'
+              className="flex-1 px-4 py-3 focus:ring-0 border-0 text-gray-900 dark:text-white focus:border-0 focus-visible:ring-0 shadow-none"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="p-1 pl-1.5 aspect-square flex items-center justify-center bg-white disabled:border disabled:border-border hover:bg-blue-700 disabled:bg-transparent disabled:cursor-not-allowed font-medium rounded-lg transition-colors scale-75"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="30"
+                height="32"
+                viewBox="0 0 15 16"
+              >
+                <path
+                  fill={`${!input.trim() ? "#454545" : "#000000"}`}
+                  d="M12.49 7.14L3.44 2.27c-.76-.41-1.64.3-1.4 1.13l1.24 4.34q.075.27 0 .54l-1.24 4.34c-.24.83.64 1.54 1.4 1.13l9.05-4.87a.98.98 0 0 0 0-1.72Z"
+                />
+              </svg>{" "}
+            </button>
+          </form>
+
+          {messages.length > 0 && (
+            <div className="mb-3 text-center">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                💾 Chat history is saved automatically
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Component to display course plan
+function CoursePlanDisplay({ output }: { output: any }) {
+  const { course_plan, course_id, success, lesson_ids } = output;
+  const [isOpen, setIsOpen] = useState(true);
+  if (!success || !course_plan) {
+    return (
+      <div className="text-red-600 dark:text-red-400">
+        Failed to generate course plan
+      </div>
+    );
+  }
+
+  return (
+    <Collapsible
+      open={isOpen}
+      onOpenChange={setIsOpen}
+      className="flex flex-col gap-2"
+    >
+      <div className="mt-4 p-4 dark:bg-zinc-900 border border-border rounded-lg mb-4 flex flex-row gap-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8">
+            <ChevronsUpDown />
+            <span className="sr-only">Toggle</span>
+          </Button>
+        </CollapsibleTrigger>
+        <div>
+          <h3 className="text-sm leading-relaxed mb-2 text-gray-900 dark:text-white">
+            {course_plan.title}
+          </h3>
+          <CollapsibleContent className="flex flex-col gap-2">
+            <div className="space-y-3">
+              {course_plan.lessons.map((lesson: any, idx: number) => (
+                <LessonCard
+                  key={idx}
+                  lesson={lesson}
+                  lessonId={lesson_ids?.[idx]}
+                  lessonNumber={idx + 1}
+                />
+              ))}
+            </div>
+          </CollapsibleContent>
+        </div>
+      </div>
+    </Collapsible>
+  );
+}
+</file>
+
+<file path="lib/ai/tools.ts">
+import z from "zod";
+import { tool } from "ai";
+import * as ai from "ai";
+import { google } from "@ai-sdk/google";
+import { wrapAISDK } from "langsmith/experimental/vercel";
+import { createClient } from "@supabase/supabase-js";
+import { inngest } from "@/inngest/client";
+import { Database } from "@/lib/types";
+
+const { generateObject } = wrapAISDK(ai);
+
+function createServiceClient() {
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
+}
+
+export const generateCoursePlan = tool({
+  name: "generate_course_plan",
+  description: "Break a topic into multiple structured lessons",
+  inputSchema: z.object({
+    outline: z
+      .string()
+      .describe("The outline of the course provided by the user"),
+    lesson_count: z.number().describe("Number of lessons to generate"),
+    userId: z.string().describe("The ID of the user creating the course"),
+  }),
+  execute: async function ({ outline, lesson_count, userId }) {
+    const supabase = createServiceClient();
+    console.log("Generating course plan for:", {
+      outline,
+      lesson_count,
+      userId,
+    });
+
+    const { object } = await generateObject({
+      model: google("gemini-flash-latest"),
+      schema: z.object({
+        title: z
+          .string()
+          .describe(
+            "40-50 Words title for the course based on provided outline",
+          ),
+        lessons: z.array(
+          z.object({
+            title: z.string().describe("The title of the topic to generate"),
+            objective: z.string().describe("Learning objective of the lesson"),
+          }),
+        ),
+      }),
+      prompt: `Create a course breakdown for the following outline:
+
+"${outline}"
+
+Generate exactly ${lesson_count} lessons that cover this topic comprehensively.
+Each lesson should have a clear title and specific learning objective.
+
+Course Outline: ${outline}
+Number of Lessons: ${lesson_count}
+
+Generate the course structure now.`,
+    });
+
+    console.log("Generated course plan:", JSON.stringify(object, null, 2));
+
+    // Insert into Supabase
+    const { data: data, error: error } = await supabase
+      .from("courses")
+      .insert({
+        title: object.title,
+        outline: outline,
+        user_id: userId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error inserting course:", error);
+      throw new Error(`Failed to store course: ${error.message}`);
+    }
+
+    const lessonInserts: Database["public"]["Tables"]["lessons"]["Insert"][] =
+      object.lessons.map((lesson, index) => ({
+        course_id: data.id,
+        title: lesson.title,
+        objective: lesson.objective,
+        status: "pending",
+      }));
+
+    const { data: lessons, error: lessonsError } = await supabase
+      .from("lessons")
+      .insert(lessonInserts)
+      .select();
+
+    if (lessonsError) {
+      throw new Error(`Failed to store lessons : ${lessonsError.message}`);
+    }
+
+    console.log(`Created ${lessons.length} lesson entries`);
+
+    const eventPromises = lessons.map((lesson) =>
+      inngest.send({
+        name: "lesson.generate",
+        data: {
+          lesson_id: lesson.id,
+          title: lesson.title,
+          objective: lesson.objective,
+          course_id: data.id,
+        },
+      }),
+    );
+
+    await Promise.all(eventPromises);
+    console.log(`Triggered ${eventPromises.length} Inngest events`);
+
+    return {
+      course_plan: object,
+      course_id: data?.id,
+      lesson_ids: lessons.map((l) => l.id),
+      lesson_count: lessons.length,
+      success: true,
+      message: `Created Course ${object.title} with ${lessons.length} lessons`,
+    };
+  },
+});
+
+export const generate_svg_tool = tool({
+  name: "generate_svg",
+  description: "Generate a clean educational SVG diagram",
+  inputSchema: z.object({
+    prompt: z
+      .string()
+      .describe(
+        "Detailed instructions describing what the diagram should show",
+      ),
+  }),
+  execute: async ({ prompt }) => {
+    // INTERNAL strict SVG generation prompt
+    const svgDirective = `
+You are an SVG diagram generator.
+
+Your ONLY task is to output a SINGLE <svg> element that contains the diagram.
+
+HARD REQUIREMENTS:
+- Output ONLY valid inline SVG markup.
+- The ENTIRE response MUST be exactly: <svg> ... </svg>
+- NO backticks, NO markdown, NO explanations, NO comments.
+- Black 2px strokes only.
+- No gradients, filters, clipPaths, masks, CSS, <defs>, external references.
+- Use simple primitives only: <line>, <circle>, <rect>, <path>, <polygon>.
+- Center the diagram and make it readable.
+- Use explicit width="600" height="300" and a matching viewBox.
+
+User diagram request:
+${prompt}
+    `.trim();
+
+    const { object } = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: z.object({
+        svg: z
+          .string()
+          .describe("The final SVG diagram. Must be a single <svg> element."),
+      }),
+      prompt: svgDirective,
+    });
+
+    return { svg: object.svg };
+  },
+});
 </file>
 
 </files>

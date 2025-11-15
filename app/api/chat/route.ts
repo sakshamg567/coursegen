@@ -1,35 +1,54 @@
-import { generateCoursePlan } from "@/lib/ai/tools";
-import { google } from "@ai-sdk/google";
-import * as ai from "ai";
-import { stepCountIs } from "ai";
-import { wrapAISDK } from "langsmith/experimental/vercel";
-
-const { streamText } = wrapAISDK(ai);
+// my-app/app/api/chat/route.ts
+import { generateLessonFromOutline } from "@/lib/ai/tools";
 
 export async function POST(req: Request) {
-  const { messages, userId }: { messages: ai.UIMessage[]; userId: string } =
-    await req.json();
-  console.log("userId: ", userId);
+  try {
+    const body = await req.json();
+    console.log("Request body:", body);
 
-  const result = streamText({
-    model: google("gemini-flash-latest"),
-    system: `You are a helpful educational assistant that helps users create structured courses.
+    const { messages, userId } = body;
 
-When a user asks to create a course or lessons, you MUST:
-0. Just generate some pretext, like whatever, a bit about topic 2-3 liners are enough.
-1. Call the generateCoursePlan
-2. Wait for the tool result
-3. Explain to the user what was created based on the tool output
-4. Include the course_id from the tool result in your response
+    if (!userId) {
+      return Response.json({ error: "Missing userId" }, { status: 400 });
+    }
 
-Always acknowledge the course creation and provide details about the generated lessons.`,
-    messages: ai.convertToModelMessages(messages),
-    tools: {
-      generateCoursePlan,
-    },
-    stopWhen: stepCountIs(5), // Allow multiple steps for tool calling
-    experimental_transform: ai.smoothStream(),
-  });
+    // Extract the outline from the last user message
+    const lastMessage = messages[messages.length - 1];
+    let outline = "";
 
-  return result.toUIMessageStreamResponse();
+    if (typeof lastMessage.content === "string") {
+      outline = lastMessage.content;
+    } else if (lastMessage.content) {
+      outline = String(lastMessage.content);
+    }
+
+    if (!outline || outline.trim() === "") {
+      return Response.json(
+        { error: "Missing lesson outline" },
+        { status: 400 },
+      );
+    }
+
+    console.log("Generating lesson with outline:", outline, "userId:", userId);
+
+    // Call the standalone function directly
+    const result = await generateLessonFromOutline({
+      outline: outline.trim(),
+      userId,
+    });
+
+    console.log("Lesson generation result:", result);
+
+    return Response.json(result);
+  } catch (error) {
+    console.error("Error in chat route:", error);
+    return Response.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to generate lesson",
+        details: error instanceof Error ? error.stack : undefined,
+      },
+      { status: 500 },
+    );
+  }
 }

@@ -14,94 +14,44 @@ export type Database = {
   }
   public: {
     Tables: {
-      courses: {
-        Row: {
-          created_at: string
-          id: number
-          outline: Json | null
-          status: string | null
-          topic: string | null
-          trace_id: string | null
-          trace_url: string | null
-          updated_at: string | null
-          user_id: string | null
-        }
-        Insert: {
-          created_at?: string
-          id?: number
-          outline?: Json | null
-          status?: string | null
-          topic?: string | null
-          trace_id?: string | null
-          trace_url?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-        }
-        Update: {
-          created_at?: string
-          id?: number
-          outline?: Json | null
-          status?: string | null
-          topic?: string | null
-          trace_id?: string | null
-          trace_url?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-        }
-        Relationships: []
-      }
       lessons: {
         Row: {
           compiled_js_url: string | null
-          course_id: number | null
           created_at: string
           error: string | null
           id: number
           objective: string | null
-          order: number | null
           status: string | null
           title: string | null
           trace_id: string | null
-          trace_url: string | null
           updated_at: string | null
+          user_id: string
         }
         Insert: {
           compiled_js_url?: string | null
-          course_id?: number | null
           created_at?: string
           error?: string | null
           id?: number
           objective?: string | null
-          order?: number | null
           status?: string | null
           title?: string | null
           trace_id?: string | null
-          trace_url?: string | null
           updated_at?: string | null
+          user_id: string
         }
         Update: {
           compiled_js_url?: string | null
-          course_id?: number | null
           created_at?: string
           error?: string | null
           id?: number
           objective?: string | null
-          order?: number | null
           status?: string | null
           title?: string | null
           trace_id?: string | null
-          trace_url?: string | null
           updated_at?: string | null
+          user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "lessons_course_id_fkey"
-            columns: ["course_id"]
-            isOneToOne: false
-            referencedRelation: "courses"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
     }
     Views: {

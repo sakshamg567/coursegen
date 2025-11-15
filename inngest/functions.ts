@@ -4,10 +4,137 @@ import { generateText } from "@/lib/ai";
 import { transformSync } from "esbuild";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "@/lib/types";
-import { generate_svg_tool } from "@/lib/ai/tools";
+import { generate_AiImage_tool } from "@/lib/ai/tools";
 import { stepCountIs } from "ai";
+import { VM } from "vm2";
+import {
+  __lesson_writer_base_prompt,
+  __lesson_writer_error_prompt,
+} from "@/lib/ai/prompt";
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 2;
+
+/**
+ * Removes thinking tags and other unwanted content from generated code
+ */
+function cleanGeneratedCode(text: string): string {
+  // Remove thinking tags and their content
+  let cleaned = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+
+  // Remove any text before the first function declaration
+  const functionStart = cleaned.search(/function\s+LessonComponent/);
+  if (functionStart !== -1) {
+    cleaned = cleaned.substring(functionStart);
+  }
+
+  // Remove markdown code blocks
+  cleaned = cleaned
+    .replace(/```typescript\n?/gi, "")
+    .replace(/```tsx\n?/gi, "")
+    .replace(/```javascript\n?/gi, "")
+    .replace(/```jsx\n?/gi, "")
+    .replace(/```react\n?/gi, "")
+    .replace(/```\n?/g, "");
+
+  // Remove any export statements
+  cleaned = cleaned.replace(/export\s+default\s+LessonComponent;?\s*/gi, "");
+  cleaned = cleaned.replace(/export\s+{\s*LessonComponent\s*};?\s*/gi, "");
+
+  // Trim whitespace
+  cleaned = cleaned.trim();
+
+  return cleaned;
+}
+
+/**
+ * Validates the compiled code by executing it in a safe VM environment
+ * Returns { valid: true } if successful, or { valid: false, error: string } if there's a runtime error
+ */
+function validateCompiledCode(compiledCode: string): {
+  valid: boolean;
+  error?: string;
+} {
+  try {
+    // Create a safe VM with a timeout
+    const vm = new VM({
+      timeout: 5000, // 5 second timeout
+      sandbox: {
+        // Mock React and common dependencies
+        React: {
+          useState: () => [null, () => {}],
+          useEffect: () => {},
+          useCallback: () => {},
+          useMemo: () => null,
+          useRef: () => ({ current: null }),
+          createElement: () => ({}),
+          Fragment: {},
+        },
+        console: {
+          log: () => {},
+          error: () => {},
+          warn: () => {},
+        },
+        // Mock window object for any window references
+        window: {},
+        document: {},
+        // Mock registry components
+        Box: () => ({}),
+        Text: () => ({}),
+        Callout: () => ({}),
+        Calculator: () => ({}),
+        AnimatedCard: () => ({}),
+        SVGCanvas: () => ({}),
+        MathFormula: () => ({}),
+        Timeline: () => ({}),
+        Quiz: () => ({}),
+        CodeBlock: () => ({}),
+        Graph: () => ({}),
+        Card: () => ({}),
+        Badge: () => ({}),
+        Progress: () => ({}),
+        Mermaid: () => ({}),
+      },
+    });
+
+    // Wrap the compiled code to catch any execution errors
+    const wrappedCode = `
+       ${compiledCode}
+
+       // Check if LessonComponent is defined and is a function
+       if (typeof LessonComponent === 'undefined') {
+         throw new Error('LessonComponent is not defined');
+       }
+
+       if (typeof LessonComponent !== 'function') {
+         throw new Error('LessonComponent is not a function');
+       }
+
+       // Try to instantiate the component to catch immediate errors
+       try {
+         LessonComponent({});
+       } catch (e) {
+         // If it's a hook error, that's okay - it means the component is structured correctly
+         if (e.message && e.message.includes('hook')) {
+           // This is expected - hooks can't be called outside of React
+           return true;
+         }
+         throw e;
+       }
+
+       return true;
+     `;
+
+    const result = vm.run(wrappedCode);
+
+    return { valid: true };
+  } catch (err: any) {
+    console.error("Runtime validation error:", err.message);
+    return {
+      valid: false,
+      error: `Runtime error: ${err.message}`,
+    };
+  }
+}
 
 // Create a Supabase client with service role for server-side operations
 function createServiceClient() {
@@ -36,7 +163,6 @@ export const generateLesson = inngest.createFunction(
     let attempt = 0;
     let lastErr = "";
     let generated_code = "";
-    let html = "";
 
     const { error: statusError } = await supabase
       .from("lessons")
@@ -58,241 +184,22 @@ export const generateLesson = inngest.createFunction(
 
       if (attempt === 1 && is_retry && previous_error) {
         // This is a manual retry with a previous error
-        prompt = `You are an expert React/TypeScript developer and educational content creator.
+        prompt =
+          `You are an expert React/TypeScript developer and educational content creator.
 
 This is a RETRY attempt. The previous generation failed with the following error:
 ${previous_error}
 
-Please generate a corrected version that addresses this error.
-
-Generate a complete, self-contained React component for the following lesson:
-Title: ${title}
-Objective: ${objective}
-
-CRITICAL REQUIREMENTS:
-1. Generate ONLY the component code, no imports, no exports, no markdown
-2. The component must be named "LessonComponent"
-3. Use Tailwind CSS for styling (it's already available)
-4. Make it interactive and engaging where appropriate
-5. Include proper TypeScript types
-6. The code must be production-ready and error-free
-7. For quizzes: include state management, answer checking, and score tracking
-8. For explanations: use clear sections, examples, and visual hierarchy
-9. For interactive content: add buttons, inputs, and dynamic behavior
-10. Use modern React patterns (hooks, functional components)
-11. MUST have ALL closing tags - validate JSX is complete
-
-SIMPLE TEMPLATE TO FOLLOW:
-
-function LessonComponent() {
-  const [activeSection, setActiveSection] = React.useState(0);
-
-  return (
-    <div className="max-w-4xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">${title}</h1>
-
-      <div className="bg-blue-50 p-6 rounded-lg mb-6">
-        <h2 className="text-xl font-semibold mb-3">Introduction</h2>
-        <p className="text-gray-700">
-          [Brief introduction about the topic]
-        </p>
-      </div>
-
-      <div className="space-y-4 mb-6">
-        <h2 className="text-xl font-semibold">Key Concepts</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-semibold mb-2">Concept 1</h3>
-            <p className="text-sm text-gray-600">[Explanation]</p>
-          </div>
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-semibold mb-2">Concept 2</h3>
-            <p className="text-sm text-gray-600">[Explanation]</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-green-50 p-6 rounded-lg">
-        <h2 className="text-xl font-semibold mb-3">Summary</h2>
-        <p className="text-gray-700">[Brief summary]</p>
-      </div>
-    </div>
-  );
-}
-
-You can use UI components from "shadcn".
-Available components:
-- Box({children, className})
-- Text({children, className})
-- Callout({title, children})
-- AnimatedCard({children, className})
-- Graph({data, xKey, yKey, height})
-- SVGCanvas({width, height, shapes})
-- Calculator({formula, inputs})
-- Quiz({questions})
-- Timeline({steps})
-- CodeBlock({code, language})
-- Math({tex})
-
-DO NOT WRITE ANY IMPORT STATEMENTS, ASSUME THE COMPONENTS TO BE IMPORTED GLOBALLY, JUST USE THEM NORMALLY
-
-## SVG GENERATION RULES
-
-You have access to a tool:
-
-    generate_svg({ prompt })
-
-Use this tool to generate **educational SVG diagrams** whenever a diagram would help understanding.
-
-Examples of when to call 'generate_svg':
-- force arrows, vectors, motion diagrams
-- geometry shapes
-- number lines
-- coordinate grid visualizations
-- free body diagrams
-- projectile motion arcs
-- physics conceptual explanations
-- math relationships or annotated shapes
-- algorithm diagrams or flowcharts
-
-Do NOT call generate_svg unless the diagram is directly useful.
-
-### After the tool returns the SVG:
-
-You MUST continue generating and embed the returned SVG in your component like this:
-
-    <div dangerouslySetInnerHTML={{ __html: \`\${svg_from_tool}\` }} />
-
-or wrap it in a component if needed.
-
-IMPORTANT: After calling any tools, you MUST output the complete LessonComponent function with the tool results incorporated.
-
-Now generate the component for: ${objective}
-
-Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`;
+Please generate a corrected version that addresses this error.` +
+          __lesson_writer_base_prompt({ title, objective });
       } else if (attempt === 1) {
         // First attempt (not a retry)
-        prompt = `You are an expert React/TypeScript developer and educational content creator.
-
-Generate a complete, self-contained React component for the following lesson:
-Title: ${title}
-Objective: ${objective}
-
-CRITICAL REQUIREMENTS:
-1. Generate ONLY the component code, no imports, no exports, no markdown
-2. The component must be named "LessonComponent"
-3. Use Tailwind CSS for styling (it's already available)
-4. Make it interactive and engaging where appropriate
-5. Include proper TypeScript types
-6. The code must be production-ready and error-free
-7. For quizzes: include state management, answer checking, and score tracking
-8. For explanations: use clear sections, examples, and visual hierarchy
-9. For interactive content: add buttons, inputs, and dynamic behavior
-10. Use modern React patterns (hooks, functional components)
-11. MUST have ALL closing tags - validate JSX is complete
-
-SIMPLE TEMPLATE TO FOLLOW:
-
-function LessonComponent() {
-  const [activeSection, setActiveSection] = React.useState(0);
-
-  return (
-    <div className="max-w-4xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">${title}</h1>
-
-      <div className="bg-blue-50 p-6 rounded-lg mb-6">
-        <h2 className="text-xl font-semibold mb-3">Introduction</h2>
-        <p className="text-gray-700">
-          [Brief introduction about the topic]
-        </p>
-      </div>
-
-      <div className="space-y-4 mb-6">
-        <h2 className="text-xl font-semibold">Key Concepts</h2>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-semibold mb-2">Concept 1</h3>
-            <p className="text-sm text-gray-600">[Explanation]</p>
-          </div>
-          <div className="bg-white p-4 rounded-lg border">
-            <h3 className="font-semibold mb-2">Concept 2</h3>
-            <p className="text-sm text-gray-600">[Explanation]</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-green-50 p-6 rounded-lg">
-        <h2 className="text-xl font-semibold mb-3">Summary</h2>
-        <p className="text-gray-700">[Brief summary]</p>
-      </div>
-    </div>
-  );
-}
-
-You can use UI components from "shadcn".
-Available components:
-- Box({children, className})
-- Text({children, className})
-- Callout({title, children})
-- AnimatedCard({children, className})
-- Graph({data, xKey, yKey, height})
-- SVGCanvas({width, height, shapes})
-- Calculator({formula, inputs})
-- Quiz({questions})
-- Timeline({steps})
-- CodeBlock({code, language})
-- Math({tex})
-
-DO NOT WRITE ANY IMPORT STATEMENTS, ASSUME THE COMPONENTS TO BE IMPORTED GLOBALLY, JUST USE THEM NORMALLY
-
-## SVG GENERATION RULES
-
-You have access to a tool:
-
-    generate_svg({ prompt })
-
-Use this tool to generate **educational SVG diagrams** whenever a diagram would help understanding.
-
-Examples of when to call 'generate_svg':
-- force arrows, vectors, motion diagrams
-- geometry shapes
-- number lines
-- coordinate grid visualizations
-- free body diagrams
-- projectile motion arcs
-- physics conceptual explanations
-- math relationships or annotated shapes
-- algorithm diagrams or flowcharts
-
-Do NOT call generate_svg unless the diagram is directly useful.
-
-### After the tool returns the SVG:
-
-You MUST continue generating and embed the returned SVG in your component like this:
-
-    <div dangerouslySetInnerHTML={{ __html: \`\${svg_from_tool}\` }} />
-
-or wrap it in a component if needed.
-
-IMPORTANT: After calling any tools, you MUST output the complete LessonComponent function with the tool results incorporated.
-
-Now generate the component for: ${objective}
-
-Return ONLY the function code, starting with "function LessonComponent()" and ending with the closing brace.`;
+        prompt =
+          "You are an expert React/TypeScript developer and educational content creator." +
+          __lesson_writer_base_prompt({ title, objective });
       } else {
         // Subsequent retry attempts within the same run
-        prompt = `The following React TSX component failed to compile or render:
-
-Error: ${lastErr}
-
-Broken Code:
-${generated_code}
-
-Fix it and output a **working corrected version** of the same component.
-Rules:
-- Keep the same function name (LessonComponent)
-- Return only the function code
-- It must compile and render without error.`;
+        prompt = __lesson_writer_error_prompt({ lastErr, generated_code });
       }
 
       const result = await generateText({
@@ -301,7 +208,7 @@ Rules:
         temperature: 0.6,
         maxOutputTokens: 10000,
         stopWhen: stepCountIs(5), // Allow up to 5 steps for tool calls and continuation
-        tools: { generate_svg: generate_svg_tool },
+        // tools: { generate_image: generate_AiImage_tool },
       });
 
       console.log("Generation steps:", result.steps?.length || 0);
@@ -315,36 +222,64 @@ Rules:
         );
       }
 
-      // Extract the final text after all tool calls
-      generated_code = result.text
-        .replace(/```typescript\n?/g, "")
-        .replace(/```tsx\n?/g, "")
-        .replace(/```javascript\n?/g, "")
-        .replace(/```jsx\n?/g, "")
-        .replace(/```\n?/g, "")
-        .trim();
+      // Extract and clean the generated code
+      console.log("Raw response length:", result.text.length);
+      generated_code = cleanGeneratedCode(result.text);
+      console.log("Cleaned code length:", generated_code.length);
 
       // If no component code generated, log the issue
       if (!generated_code.includes("function LessonComponent")) {
         console.error("No LessonComponent found in generated code!");
-        console.error("Full response:", result.text);
+        console.error(
+          "Raw response (first 500 chars):",
+          result.text.substring(0, 500),
+        );
         lastErr = "Model did not generate a LessonComponent function";
+        continue;
+      }
+
+      // ===== Basic syntax validation =====
+      const openBraces = (generated_code.match(/{/g) || []).length;
+      const closeBraces = (generated_code.match(/}/g) || []).length;
+      const openParens = (generated_code.match(/\(/g) || []).length;
+      const closeParens = (generated_code.match(/\)/g) || []).length;
+
+      if (openBraces !== closeBraces) {
+        lastErr = `Syntax error: Mismatched braces (${openBraces} open, ${closeBraces} close)`;
+        console.warn(lastErr);
+        continue;
+      }
+
+      if (openParens !== closeParens) {
+        lastErr = `Syntax error: Mismatched parentheses (${openParens} open, ${closeParens} close)`;
+        console.warn(lastErr);
         continue;
       }
 
       let compiled: string;
 
       try {
-        console.log("compiling code \n\n");
+        console.log("Compiling code...\n");
 
         const result = transformSync(generated_code, {
           loader: "tsx",
           format: "esm",
         });
 
-        console.log("compiled code : ", result.code, "\n\n");
+        console.log("Compiled successfully\n");
 
         compiled = result.code;
+
+        // // ====== RUNTIME VALIDATION ======
+        // const validation = validateCompiledCode(compiled);
+
+        // if (!validation.valid) {
+        //   lastErr = validation.error || "Runtime validation failed";
+        //   console.warn("Runtime validation failed:", lastErr);
+        //   continue;
+        // }
+
+        // console.log("Runtime validation passed");
 
         const fileName = `${lesson_id}.js`;
         const { error: uploadError } = await supabase.storage

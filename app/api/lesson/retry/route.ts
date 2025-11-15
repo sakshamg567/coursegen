@@ -61,7 +61,6 @@ export async function POST(request: NextRequest) {
         lesson_id: lesson.id,
         title: lesson.title,
         objective: lesson.objective,
-        course_id: lesson.course_id,
         previous_error: lesson.error, // Include the previous error
         is_retry: true,
       },

@@ -3,19 +3,28 @@
 import { use, useEffect, useState } from "react";
 import React from "react";
 import * as RegistryComponents from "@/components/registry";
-
-const {
-  Box,
-  Text,
-  Callout,
-  Calculator,
-  AnimatedCard,
-  SVGCanvas,
-  Math,
-  Timeline,
-  Quiz,
-  CodeBlock,
-} = RegistryComponents;
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 export default function LessonPage({
   params,
@@ -57,21 +66,92 @@ export default function LessonPage({
             "",
           );
 
-        // Wrap the code to inject React and registry components
+        // Wrap the code to inject React and all available components
         const wrappedCode = `
 const React = window.__REACT__;
 const { useState, useEffect, useCallback, useMemo, useRef } = React;
-const { Box, Text, Callout, Calculator, AnimatedCard, SVGCanvas, Math, Timeline, Quiz, CodeBlock, Graph } = window.__REGISTRY__;
+
+// Registry components
+const {
+  Box,
+  Text,
+  Card,
+  Callout,
+  Calculator,
+  AnimatedCard,
+  SVGCanvas,
+  MathFormula,
+  Timeline,
+  Quiz,
+  CodeBlock,
+  Graph,
+  Badge,
+  Progress,
+  Mermaid
+} = window.__REGISTRY__;
+
+// Shadcn UI components
+const {
+  Button,
+  Input,
+  Slider,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  RadioGroup,
+  RadioGroupItem,
+  Checkbox,
+  Label
+} = window.__SHADCN__;
 
 ${codeWithoutImports}
 
 export default LessonComponent
-
 `;
 
-        // Expose React and registry components globally for the dynamic module
+        // Expose React, registry components, and shadcn components globally
         (window as any).__REACT__ = React;
         (window as any).__REGISTRY__ = RegistryComponents;
+        (window as any).__SHADCN__ = {
+          Button,
+          Input,
+          Slider,
+          Tabs,
+          TabsContent,
+          TabsList,
+          TabsTrigger,
+          Accordion,
+          AccordionContent,
+          AccordionItem,
+          AccordionTrigger,
+          Alert,
+          AlertDescription,
+          AlertTitle,
+          Select,
+          SelectContent,
+          SelectItem,
+          SelectTrigger,
+          SelectValue,
+          Switch,
+          RadioGroup,
+          RadioGroupItem,
+          Checkbox,
+          Label,
+        };
 
         // Create a blob URL from the code
         const blob = new Blob([wrappedCode], {
@@ -112,7 +192,7 @@ export default LessonComponent
   if (error) {
     return (
       <div className="p-6 max-w-2xl mx-auto">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
           <strong className="font-bold">Error: </strong>
           <span className="block sm:inline">{error}</span>
         </div>
@@ -122,27 +202,27 @@ export default LessonComponent
 
   if (loading) {
     return (
-      <div className="p-6 max-w-2xl mx-auto text-center">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-3/4 mx-auto"></div>
-          <div className="h-4 bg-gray-200 rounded"></div>
-          <div className="h-4 bg-gray-200 rounded w-5/6 mx-auto"></div>
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading lesson...</p>
         </div>
-        <p className="mt-4 text-gray-600">Loading lesson...</p>
       </div>
     );
   }
 
   if (!Comp) {
     return (
-      <div className="p-6 text-center text-gray-500">
-        No component available
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="p-6 text-center text-gray-500">
+          No component available
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="bg-[#0a0a0a]">
       <Comp />
     </div>
   );

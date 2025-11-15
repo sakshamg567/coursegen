@@ -1,3 +1,4 @@
+// my-app/lib/ai/tools.ts
 import z from "zod";
 import { tool } from "ai";
 import * as ai from "ai";
@@ -22,118 +23,106 @@ function createServiceClient() {
   );
 }
 
-export const generateCoursePlan = tool({
-  name: "generate_course_plan",
-  description: "Break a topic into multiple structured lessons",
-  inputSchema: z.object({
-    outline: z
-      .string()
-      .describe("The outline of the course provided by the user"),
-    lesson_count: z.number().describe("Number of lessons to generate"),
-    userId: z.string().describe("The ID of the user creating the course"),
-  }),
-  execute: async function ({ outline, lesson_count, userId }) {
-    const supabase = createServiceClient();
-    console.log("Generating course plan for:", {
-      outline,
-      lesson_count,
-      userId,
-    });
+// Extract the logic into a standalone function
+export async function generateLessonFromOutline({
+  outline,
+  userId,
+}: {
+  outline: string;
+  userId: string;
+}) {
+  const supabase = createServiceClient();
+  console.log("Generating lesson for:", {
+    outline,
+    userId,
+  });
 
-    const { object } = await generateObject({
-      model: google("gemini-flash-latest"),
-      schema: z.object({
-        topic: z
+  const { object } = await generateObject({
+    model: google("gemini-flash-latest"),
+    schema: z.object({
+      lesson: z.object({
+        objective: z.string().describe("Learning objective of the lesson"),
+        title: z
           .string()
           .describe(
-            "50-80 Words title for the course based on provided outline",
+            "40-50 character title for the lesson based on provided outline",
           ),
-        lessons: z.array(
-          z.object({
-            title: z.string().describe("The title of the topic to generate"),
-            objective: z.string().describe("Learning objective of the lesson"),
-          }),
-        ),
       }),
-      prompt: `Create a course breakdown for the following outline:
+    }),
+    prompt: `Create a lesson breakdown for the following outline:
 
 "${outline}"
 
-Generate exactly ${lesson_count} lessons that cover this topic comprehensively.
-Each lesson should have a clear title and specific learning objective.
+Generate exactly 1 lesson that cover this topic comprehensively.
+The lesson should have a clear title and specific learning objective.
 
 Course Outline: ${outline}
-Number of Lessons: ${lesson_count}
 
-Generate the course structure now.`,
-    });
+Generate the lesson structure now.
+- Never return an array.
+- Never return more than one lesson.
+- The lesson must be fully self-contained.
+`,
+  });
 
-    console.log("Generated course plan:", JSON.stringify(object, null, 2));
+  console.log("Generated lesson plan:", JSON.stringify(object, null, 2));
 
-    // Insert into Supabase
-    const { data: data, error: error } = await supabase
-      .from("courses")
-      .insert({
-        topic: object.topic,
-        outline: outline,
-        user_id: userId,
-      })
-      .select()
-      .single();
+  // Insert into Supabase
+  const { data: lesson, error: error } = await supabase
+    .from("lessons")
+    .insert({
+      title: object.lesson.title,
+      objective: object.lesson.objective,
+      status: "pending",
+      user_id: userId,
+    })
+    .select()
+    .single();
 
-    if (error) {
-      console.error("Error inserting course:", error);
-      throw new Error(`Failed to store course: ${error.message}`);
-    }
+  if (error) {
+    console.error("Error inserting lesson:", error);
+    throw new Error(`Failed to store lesson: ${error.message}`);
+  }
 
-    const lessonInserts: Database["public"]["Tables"]["lessons"]["Insert"][] =
-      object.lessons.map((lesson, index) => ({
-        course_id: data.id,
-        title: lesson.title,
-        objective: lesson.objective,
-        status: "pending",
-      }));
+  inngest.send({
+    name: "lesson.generate",
+    data: {
+      lesson_id: lesson.id,
+      title: lesson.title,
+      objective: lesson.objective,
+      user_id: lesson.user_id,
+    },
+  });
 
-    const { data: lessons, error: lessonsError } = await supabase
-      .from("lessons")
-      .insert(lessonInserts)
-      .select();
+  console.log(`Triggered Inngest event for lesson : ${lesson.title}`);
 
-    if (lessonsError) {
-      throw new Error(`Failed to store lessons : ${lessonsError.message}`);
-    }
+  return {
+    lesson: object,
+    lesson_id: lesson.id,
+    success: true,
+    message: `Created lesson ${lesson.title}`,
+  };
+}
 
-    console.log(`Created ${lessons.length} lesson entries`);
-
-    const eventPromises = lessons.map((lesson) =>
-      inngest.send({
-        name: "lesson.generate",
-        data: {
-          lesson_id: lesson.id,
-          title: lesson.title,
-          objective: lesson.objective,
-          course_id: data.id,
-        },
-      }),
-    );
-
-    await Promise.all(eventPromises);
-    console.log(`Triggered ${eventPromises.length} Inngest events`);
-
-    return {
-      course_plan: object,
-      course_id: data?.id,
-      lesson_ids: lessons.map((l) => l.id),
-      lesson_count: lessons.length,
-      success: true,
-      message: `Created Course ${object.topic} with ${lessons.length} lessons`,
-    };
+// Keep the tool for AI SDK usage
+export const generate_lesson = tool({
+  name: "generate_lesson",
+  description: "Formulate a topic into a designed structured lessons",
+  inputSchema: z.object({
+    outline: z
+      .string()
+      .describe("The outline of the lesson provided by the user"),
+    userId: z.string().describe("The ID of the user creating the course"),
+  }),
+  execute: async function ({ outline, userId }) {
+    return generateLessonFromOutline({ outline, userId });
   },
 });
 
-export const generate_svg_tool = tool({
-  name: "generate_svg",
-  description: "Generate a clean educational SVG diagram",
+export const generate_AiImage_tool = tool({
+  name: "generate_ai_img_tool",
+  description:
+    "Generate an ai generated image for educational course Returns the base64 data of the image",
   inputSchema: z.object({
     prompt: z
       .string()
@@ -143,35 +132,12 @@ export const generate_svg_tool = tool({
   }),
   execute: async ({ prompt }) => {
     // INTERNAL strict SVG generation prompt
-    const svgDirective = `
-You are an SVG diagram generator.
 
-Your ONLY task is to output a SINGLE <svg> element that contains the diagram.
-
-HARD REQUIREMENTS:
-- Output ONLY valid inline SVG markup.
-- The ENTIRE response MUST be exactly: <svg> ... </svg>
-- NO backticks, NO markdown, NO explanations, NO comments.
-- Black 2px strokes only.
-- No gradients, filters, clipPaths, masks, CSS, <defs>, external references.
-- Use simple primitives only: <line>, <circle>, <rect>, <path>, <polygon>.
-- Center the diagram and make it readable.
-- Use explicit width="600" height="300" and a matching viewBox.
-
-User diagram request:
-${prompt}
-    `.trim();
-
-    const { object } = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: z.object({
-        svg: z
-          .string()
-          .describe("The final SVG diagram. Must be a single <svg> element."),
-      }),
-      prompt: svgDirective,
+    const { image } = await ai.experimental_generateImage({
+      model: google.image("imagen-3.0-generate-002"),
+      prompt: prompt,
     });
 
-    return { svg: object.svg };
+    return { base64: image.base64 };
   },
 });

@@ -7,15 +7,7 @@ import { ArrowRight, RefreshCw } from "lucide-react";
 
 type Lesson = Tables<"lessons">;
 
-export default function LessonCard({
-  lesson,
-  lessonId,
-  lessonNumber,
-}: {
-  lesson: any;
-  lessonId?: number;
-  lessonNumber: number;
-}) {
+export default function LessonCard({ lesson }: { lesson: Lesson }) {
   const [lessonStatus, setLessonStatus] = useState<string | null>(
     lesson.status || "pending",
   );
@@ -25,14 +17,14 @@ export default function LessonCard({
   const supabase = createClient();
 
   useEffect(() => {
-    if (!lessonId) return;
+    if (!lesson.id) return;
 
     // Fetch initial lesson status
     const fetchLesson = async () => {
       const { data, error } = await supabase
         .from("lessons")
         .select("status, compiled_js_url, error")
-        .eq("id", lessonId)
+        .eq("id", lesson.id)
         .single();
 
       if (data) {
@@ -46,14 +38,14 @@ export default function LessonCard({
 
     // Subscribe to realtime updates
     const channel = supabase
-      .channel(`lesson-${lessonId}`)
+      .channel(`lesson-${lesson.id}`)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
           table: "lessons",
-          filter: `id=eq.${lessonId}`,
+          filter: `id=eq.${lesson.id}`,
         },
         (payload) => {
           const newLesson = payload.new as Lesson;
@@ -72,10 +64,10 @@ export default function LessonCard({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [lessonId, supabase]);
+  }, [lesson.id, supabase]);
 
   const handleRetry = async () => {
-    if (!lessonId || isRetrying) return;
+    if (!lesson.id || isRetrying) return;
 
     setIsRetrying(true);
     try {
@@ -84,7 +76,7 @@ export default function LessonCard({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ lessonId }),
+        body: JSON.stringify({ lessonId: lesson.id }),
       });
 
       const data = await response.json();
@@ -109,9 +101,6 @@ export default function LessonCard({
     <div className="p-3 rounded border border-gray-200 dark:border-gray-700">
       <div className="flex justify-between items-center gap-3">
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-gray-900 dark:text-white">
-            Lesson {lessonNumber}: {lesson.title}
-          </div>
           <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
             {lesson.objective}
           </div>
@@ -125,9 +114,9 @@ export default function LessonCard({
         </div>
 
         {/* Link to lesson when ready */}
-        {isReady && lessonId ? (
+        {isReady && lesson.id ? (
           <Link
-            href={`/lesson/${lessonId}`}
+            href={`/lesson/${lesson.id}`}
             className="flex-shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors flex flex-row items-center"
           >
             View Lesson {<ArrowRight className="scale-75" />}
@@ -135,7 +124,7 @@ export default function LessonCard({
         ) : (
           <div className="flex items-center gap-2">
             <LessonStatusBadge status={lessonStatus} />
-            {lessonStatus === "failed" && lessonId && (
+            {lessonStatus === "failed" && lesson.id && (
               <button
                 onClick={handleRetry}
                 disabled={isRetrying}
