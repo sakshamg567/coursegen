@@ -7,7 +7,6 @@ import { wrapAISDK } from "langsmith/experimental/vercel";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "@/inngest/client";
 import { Database } from "@/lib/types";
-
 const { generateObject } = wrapAISDK(ai);
 
 function createServiceClient() {
@@ -38,7 +37,7 @@ export async function generateLessonFromOutline({
   });
 
   const { object } = await generateObject({
-    model: google("gemini-flash-latest"),
+    model: google("gemini-flash-lite-latest"),
     schema: z.object({
       lesson: z.object({
         objective: z.string().describe("Learning objective of the lesson"),
@@ -116,28 +115,5 @@ export const generate_lesson = tool({
   }),
   execute: async function ({ outline, userId }) {
     return generateLessonFromOutline({ outline, userId });
-  },
-});
-
-export const generate_AiImage_tool = tool({
-  name: "generate_ai_img_tool",
-  description:
-    "Generate an ai generated image for educational course Returns the base64 data of the image",
-  inputSchema: z.object({
-    prompt: z
-      .string()
-      .describe(
-        "Detailed instructions describing what the diagram should show",
-      ),
-  }),
-  execute: async ({ prompt }) => {
-    // INTERNAL strict SVG generation prompt
-
-    const { image } = await ai.experimental_generateImage({
-      model: google.image("imagen-3.0-generate-002"),
-      prompt: prompt,
-    });
-
-    return { base64: image.base64 };
   },
 });
