@@ -102,7 +102,7 @@ export default function LessonCard({ lesson }: { lesson: Lesson }) {
       <div className="flex justify-between items-center gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            {lesson.objective}
+            {lesson.title}
           </div>
 
           {/* Show error message if failed */}
