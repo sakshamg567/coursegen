@@ -7,6 +7,7 @@ import { wrapAISDK } from "langsmith/experimental/vercel";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "@/inngest/client";
 import { Database } from "@/lib/types";
+import { generateLesson } from "@/inngest/functions";
 const { generateObject } = wrapAISDK(ai);
 
 function createServiceClient() {
@@ -83,17 +84,19 @@ Generate the lesson structure now.
     throw new Error(`Failed to store lesson: ${error.message}`);
   }
 
-  inngest.send({
-    name: "lesson.generate",
-    data: {
-      lesson_id: lesson.id,
-      title: lesson.title,
-      objective: lesson.objective,
-      user_id: lesson.user_id,
+  generateLesson({
+    event: {
+      name: "lesson.generate",
+      data: {
+        lesson_id: lesson.id,
+        title: lesson.title,
+        objective: lesson.objective,
+        user_id: lesson.user_id,
+      },
     },
   });
 
-  console.log(`Triggered Inngest event for lesson : ${lesson.title}`);
+  console.log(`Triggered generation for lesson : ${lesson.title}`);
 
   return {
     lesson: object,
